@@ -6,24 +6,31 @@ export class GatewayWatcher extends BaseWatcher {
   readonly defaultInterval = 30;
 
   async check(): Promise<WatchResult[]> {
-    // Try pgrep first
-    const pgrep = runShell('pgrep -f "openclaw"');
-    if (pgrep.ok && pgrep.stdout.trim().length > 0) {
-      const pids = pgrep.stdout.trim().split('\n').join(', ');
-      return [this.ok(`Gateway process running (PIDs: ${pids})`, 'gateway_running')];
+    // Check openclaw gateway status directly
+    const status = runShell('openclaw gateway status 2>/dev/null');
+    if (status.ok && /running|active|started/i.test(status.stdout)) {
+      return [this.ok('Gateway running', 'gateway_running')];
     }
 
-    // Try systemctl
+    // Fallback: check systemd service
     const systemctl = runShell('systemctl is-active openclaw-gateway 2>/dev/null');
     if (systemctl.ok && systemctl.stdout.trim() === 'active') {
       return [this.ok('Gateway systemd service active', 'gateway_running')];
+    }
+
+    // Fallback: check if any openclaw gateway process exists
+    // Use more specific match to avoid matching unrelated openclaw processes
+    const pgrep = runShell('pgrep -f "openclaw.*gateway" 2>/dev/null');
+    if (pgrep.ok && pgrep.stdout.trim().length > 0) {
+      const pid = pgrep.stdout.trim().split('\n')[0]; // Just show first PID
+      return [this.ok(`Gateway process running (PID: ${pid})`, 'gateway_running')];
     }
 
     return [
       this.critical(
         'Gateway process not found',
         'gateway_down',
-        { pgrep_stdout: pgrep.stdout, pgrep_stderr: pgrep.stderr }
+        { statusOutput: status.stdout?.substring(0, 200), statusErr: status.stderr?.substring(0, 200) }
       ),
     ];
   }
