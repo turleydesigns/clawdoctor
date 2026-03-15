@@ -1,5 +1,5 @@
 import { execFileSync } from 'child_process';
-import { ClawDoctorConfig, loadLicense, Plan } from './config.js';
+import { ClawDoctorConfig, loadLicense, refreshEnvKeyCache, Plan } from './config.js';
 import { BaseWatcher, WatchResult } from './watchers/base.js';
 import { GatewayWatcher } from './watchers/gateway.js';
 import { CronWatcher } from './watchers/cron.js';
@@ -31,6 +31,13 @@ const PLAN_MONITOR_LIMITS: Record<Plan, number> = {
 // Plans that allow auto-fix
 const AUTO_FIX_PLANS: Plan[] = ['heal'];
 
+// Retention days per plan
+const PLAN_RETENTION_DAYS: Record<Plan, number> = {
+  free: 7,
+  diagnose: 30,
+  heal: 90,
+};
+
 export class Daemon {
   private config: ClawDoctorConfig;
   private watchers: WatcherEntry[] = [];
@@ -55,6 +62,8 @@ export class Daemon {
     this.authHealer = new AuthHealer(config);
     this.sessionHealer = new SessionHealer(config);
     this.plan = loadLicense()?.plan ?? 'free';
+    // Enforce tier-appropriate retention; override any manual config
+    this.config.retentionDays = PLAN_RETENTION_DAYS[this.plan];
     this.setupWatchers();
   }
 
@@ -117,6 +126,23 @@ export class Daemon {
     console.log(`[${nowIso()}] Plan: ${this.plan.toUpperCase()}`);
     console.log(`[${nowIso()}] Monitoring ${this.watchers.length} watcher(s)`);
 
+    // Refresh env key plan cache in background (updates plan on next restart if changed)
+    const envKey = process.env.CLAWDOCTOR_KEY;
+    if (envKey) {
+      refreshEnvKeyCache(envKey).then(() => {
+        const refreshedPlan = loadLicense()?.plan ?? 'free';
+        if (refreshedPlan !== this.plan) {
+          console.log(`[${nowIso()}] Plan updated from env key validation: ${this.plan} -> ${refreshedPlan}`);
+          this.plan = refreshedPlan;
+          this.config.retentionDays = PLAN_RETENTION_DAYS[this.plan];
+          this.watchers = [];
+          this.setupWatchers();
+        }
+      }).catch(() => {
+        // Non-fatal: keep current plan
+      });
+    }
+
     if (this.config.dryRun) {
       console.log(`[${nowIso()}] DRY RUN mode - healers will not take action`);
     }
@@ -148,6 +174,7 @@ export class Daemon {
       if (updatedPlan !== this.plan) {
         console.log(`[${nowIso()}] Plan changed: ${this.plan} -> ${updatedPlan}. Reloading watchers.`);
         this.plan = updatedPlan;
+        this.config.retentionDays = PLAN_RETENTION_DAYS[this.plan];
         this.watchers = [];
         this.setupWatchers();
       }

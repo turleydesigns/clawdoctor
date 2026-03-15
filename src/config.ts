@@ -50,6 +50,7 @@ export const PID_PATH = path.join(AGENTWATCH_DIR, 'clawdoctor.pid');
 export const LICENSE_PATH = path.join(AGENTWATCH_DIR, 'license.json');
 export const SNAPSHOTS_DIR = path.join(AGENTWATCH_DIR, 'snapshots');
 export const AUDIT_PATH = path.join(AGENTWATCH_DIR, 'audit.jsonl');
+export const ENV_KEY_CACHE_PATH = path.join(AGENTWATCH_DIR, 'env-key-cache.json');
 
 export type Plan = 'free' | 'diagnose' | 'heal';
 
@@ -89,7 +90,25 @@ export function loadLicense(): LicenseInfo | null {
   // Env var takes precedence
   const envKey = process.env.CLAWDOCTOR_KEY;
   if (envKey) {
-    // Return a stub; validate lazily if needed
+    // Check cache for previously validated plan
+    try {
+      if (fs.existsSync(ENV_KEY_CACHE_PATH)) {
+        const cache = JSON.parse(fs.readFileSync(ENV_KEY_CACHE_PATH, 'utf-8')) as {
+          key: string;
+          plan: Plan;
+          features: string[];
+          cachedAt: string;
+        };
+        const ageMs = Date.now() - new Date(cache.cachedAt).getTime();
+        const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+        if (cache.key === envKey && ageMs < ONE_DAY_MS) {
+          return { key: envKey, plan: cache.plan, features: cache.features, validatedAt: cache.cachedAt };
+        }
+      }
+    } catch {
+      // ignore cache errors
+    }
+    // Fallback to diagnose until cache is refreshed
     return { key: envKey, plan: 'diagnose', features: PLAN_FEATURES.diagnose, validatedAt: new Date().toISOString() };
   }
 
@@ -101,6 +120,19 @@ export function loadLicense(): LicenseInfo | null {
     // ignore
   }
   return null;
+}
+
+export async function refreshEnvKeyCache(key: string): Promise<void> {
+  const result = await validateKeyRemote(key);
+  if (!result.valid || !result.plan) return;
+  ensureAgentwatchDir();
+  const cache = {
+    key,
+    plan: result.plan,
+    features: result.features ?? PLAN_FEATURES[result.plan],
+    cachedAt: new Date().toISOString(),
+  };
+  fs.writeFileSync(ENV_KEY_CACHE_PATH, JSON.stringify(cache, null, 2), { encoding: 'utf-8', mode: 0o600 });
 }
 
 export function saveLicense(info: LicenseInfo): void {
@@ -163,8 +195,8 @@ export const DEFAULT_CONFIG: ClawDoctorConfig = {
   healers: {
     processRestart: { enabled: true, dryRun: false },
     cronRetry: { enabled: true, dryRun: false },
-    auth: { enabled: true, dryRun: true },
-    session: { enabled: true, dryRun: true },
+    auth: { enabled: true, dryRun: false },
+    session: { enabled: true, dryRun: false },
   },
   alerts: {
     telegram: {
