@@ -11,7 +11,7 @@ import {
   DEFAULT_CONFIG,
   AGENTWATCH_DIR,
   PID_PATH,
-  AgentWatchConfig,
+  ClawDoctorConfig,
 } from './config.js';
 import { Daemon } from './daemon.js';
 import { getRecentEvents, pruneOldEvents } from './store.js';
@@ -22,8 +22,8 @@ const pkg = { version: '0.1.0' };
 const program = new Command();
 
 program
-  .name('agentwatch')
-  .description('Self-healing monitor for OpenClaw')
+  .name('clawdoctor')
+  .description('Self-healing doctor for OpenClaw')
   .version(pkg.version);
 
 // ── init ──────────────────────────────────────────────────────────────────────
@@ -31,7 +31,7 @@ program
   .command('init')
   .description('Interactive setup: detect OpenClaw, configure alerts')
   .action(async () => {
-    console.log('\n🔍 AgentWatch Setup\n');
+    console.log('\n🔍 ClawDoctor Setup\n');
 
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
     const ask = (question: string, defaultVal = ''): Promise<string> =>
@@ -88,7 +88,7 @@ program
 
     rl.close();
 
-    const config: AgentWatchConfig = {
+    const config: ClawDoctorConfig = {
       ...DEFAULT_CONFIG,
       openclawPath,
       watchers: {
@@ -117,8 +117,8 @@ program
     console.log(`\n✅ Config saved to ${AGENTWATCH_DIR}/config.json`);
 
     // Offer systemd install
-    console.log('\n💡 To start monitoring now, run: agentwatch start');
-    console.log('💡 To install as a systemd service, run: agentwatch install-service');
+    console.log('\n💡 To start monitoring now, run: clawdoctor start');
+    console.log('💡 To install as a systemd service, run: clawdoctor install-service');
     console.log('');
   });
 
@@ -128,7 +128,7 @@ program
   .description('Start monitoring daemon (foreground)')
   .option('--dry-run', 'Run in dry-run mode (no healing actions)')
   .action((opts: { dryRun?: boolean }) => {
-    let config: AgentWatchConfig;
+    let config: ClawDoctorConfig;
     try {
       config = loadConfig();
     } catch (err) {
@@ -162,7 +162,7 @@ program
   .description('Stop the running daemon')
   .action(() => {
     if (!fs.existsSync(PID_PATH)) {
-      console.log('No daemon PID file found. Is agentwatch running?');
+      console.log('No daemon PID file found. Is clawdoctor running?');
       process.exit(1);
     }
 
@@ -186,7 +186,7 @@ program
   .command('status')
   .description('Show current health of all monitors')
   .action(async () => {
-    let config: AgentWatchConfig;
+    let config: ClawDoctorConfig;
     try {
       config = loadConfig();
     } catch (err) {
@@ -195,7 +195,7 @@ program
     }
 
     const daemonRunning = isDaemonRunning();
-    console.log(`\nAgentWatch Status`);
+    console.log(`\nClawDoctor Status`);
     console.log(`─────────────────`);
     console.log(`Daemon:     ${daemonRunning ? '✅ running' : '⚪ stopped'}`);
     console.log(`Config:     ${AGENTWATCH_DIR}/config.json`);
@@ -235,7 +235,7 @@ program
   .option('-s, --severity <level>', 'Filter by severity (info|warning|error|critical)')
   .action((opts: { lines: string; watcher?: string; severity?: string }) => {
     const limit = parseInt(opts.lines, 10);
-    let config: AgentWatchConfig;
+    let config: ClawDoctorConfig;
     try {
       config = loadConfig();
     } catch (err) {
@@ -272,11 +272,11 @@ program
 // ── install-service ───────────────────────────────────────────────────────────
 program
   .command('install-service')
-  .description('Install agentwatch as a systemd user service')
+  .description('Install clawdoctor as a systemd user service')
   .action(() => {
-    const agentWatchBin = runShell('which agentwatch').stdout.trim() || process.argv[1];
+    const agentWatchBin = runShell('which clawdoctor').stdout.trim() || process.argv[1];
     const serviceContent = `[Unit]
-Description=AgentWatch — OpenClaw monitor
+Description=ClawDoctor — OpenClaw monitor
 After=network.target
 
 [Service]
@@ -293,14 +293,14 @@ WantedBy=default.target
 
     const systemdUserDir = path.join(os.homedir(), '.config', 'systemd', 'user');
     fs.mkdirSync(systemdUserDir, { recursive: true });
-    const serviceFile = path.join(systemdUserDir, 'agentwatch.service');
+    const serviceFile = path.join(systemdUserDir, 'clawdoctor.service');
     fs.writeFileSync(serviceFile, serviceContent, 'utf-8');
 
     console.log(`✅ Service file written to ${serviceFile}`);
     console.log('\nTo enable and start:');
     console.log('  systemctl --user daemon-reload');
-    console.log('  systemctl --user enable agentwatch');
-    console.log('  systemctl --user start agentwatch');
+    console.log('  systemctl --user enable clawdoctor');
+    console.log('  systemctl --user start clawdoctor');
     console.log('');
   });
 

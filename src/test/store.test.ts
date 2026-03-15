@@ -5,7 +5,7 @@ import path from 'path';
 import os from 'os';
 import Database from 'better-sqlite3';
 
-const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentwatch-store-test-'));
+const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'clawdoctor-store-test-'));
 const dbPath = path.join(tmpDir, 'events.db');
 
 // Minimal in-process store test that doesn't rely on the module's global path

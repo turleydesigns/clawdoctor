@@ -1,4 +1,4 @@
-import { AgentWatchConfig } from '../config.js';
+import { ClawDoctorConfig } from '../config.js';
 import { WatchResult } from '../watchers/base.js';
 import { HealResult } from '../healers/base.js';
 import { nowUtcDisplay, hostname } from '../utils.js';
@@ -14,10 +14,10 @@ interface AlertPayload {
 }
 
 export class TelegramAlerter {
-  private config: AgentWatchConfig;
+  private config: ClawDoctorConfig;
   private lastAlertTime: Map<string, number> = new Map();
 
-  constructor(config: AgentWatchConfig) {
+  constructor(config: ClawDoctorConfig) {
     this.config = config;
   }
 
@@ -83,7 +83,7 @@ export class TelegramAlerter {
       : '';
 
     const lines = [
-      `${icon} <b>AgentWatch Alert</b>`,
+      `${icon} <b>ClawDoctor Alert</b>`,
       `Monitor: ${watcher}`,
       `Event: ${result.message}`,
       ...(actionLine ? [actionLine] : []),

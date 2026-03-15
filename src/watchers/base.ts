@@ -1,4 +1,4 @@
-import { AgentWatchConfig } from '../config.js';
+import { ClawDoctorConfig } from '../config.js';
 import { insertEvent, Severity } from '../store.js';
 import { nowIso } from '../utils.js';
 
@@ -14,9 +14,9 @@ export abstract class BaseWatcher {
   abstract readonly name: string;
   abstract readonly defaultInterval: number;
 
-  protected config: AgentWatchConfig;
+  protected config: ClawDoctorConfig;
 
-  constructor(config: AgentWatchConfig) {
+  constructor(config: ClawDoctorConfig) {
     this.config = config;
   }
 

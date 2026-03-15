@@ -1,10 +1,10 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { TelegramAlerter } from '../alerters/telegram.js';
-import { AgentWatchConfig, DEFAULT_CONFIG } from '../config.js';
+import { ClawDoctorConfig, DEFAULT_CONFIG } from '../config.js';
 import { WatchResult } from '../watchers/base.js';
 
-function makeConfig(overrides: Partial<AgentWatchConfig['alerts']['telegram']> = {}): AgentWatchConfig {
+function makeConfig(overrides: Partial<ClawDoctorConfig['alerts']['telegram']> = {}): ClawDoctorConfig {
   return {
     ...DEFAULT_CONFIG,
     alerts: {

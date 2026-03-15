@@ -5,7 +5,7 @@ import path from 'path';
 import os from 'os';
 
 // We test config validation by importing config functions after patching paths
-const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentwatch-test-'));
+const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'clawdoctor-test-'));
 const configPath = path.join(tmpDir, 'config.json');
 
 describe('Config', () => {

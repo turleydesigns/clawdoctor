@@ -1,4 +1,4 @@
-import { AgentWatchConfig } from '../config.js';
+import { ClawDoctorConfig } from '../config.js';
 import { insertEvent } from '../store.js';
 import { nowIso } from '../utils.js';
 
@@ -12,9 +12,9 @@ export interface HealResult {
 export abstract class BaseHealer {
   abstract readonly name: string;
 
-  protected config: AgentWatchConfig;
+  protected config: ClawDoctorConfig;
 
-  constructor(config: AgentWatchConfig) {
+  constructor(config: ClawDoctorConfig) {
     this.config = config;
   }
 

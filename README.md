@@ -1,4 +1,4 @@
-# agentwatch
+# clawdoctor
 
 Self-healing monitor for OpenClaw. Watches your gateway, crons, and agent sessions, sends Telegram alerts, and auto-fixes what it can.
 
@@ -7,31 +7,31 @@ Built by people who run 20+ OpenClaw agents in production and got tired of check
 ## Install
 
 ```bash
-npm install -g agentwatch
+npm install -g clawdoctor
 ```
 
 ## Quick Start
 
 ```bash
 # Configure
-agentwatch init
+clawdoctor init
 
 # Start monitoring
-agentwatch start
+clawdoctor start
 ```
 
 ## Commands
 
 ```bash
-agentwatch init             # Interactive setup
-agentwatch start            # Start monitoring daemon
-agentwatch start --dry-run  # Run without taking healing actions
-agentwatch stop             # Stop daemon
-agentwatch status           # Live health check of all monitors
-agentwatch log              # Show recent events from local database
-agentwatch log -n 100       # Show 100 events
-agentwatch log -w GatewayWatcher -s critical  # Filter by watcher/severity
-agentwatch install-service  # Install as systemd user service
+clawdoctor init             # Interactive setup
+clawdoctor start            # Start monitoring daemon
+clawdoctor start --dry-run  # Run without taking healing actions
+clawdoctor stop             # Stop daemon
+clawdoctor status           # Live health check of all monitors
+clawdoctor log              # Show recent events from local database
+clawdoctor log -n 100       # Show 100 events
+clawdoctor log -w GatewayWatcher -s critical  # Filter by watcher/severity
+clawdoctor install-service  # Install as systemd user service
 ```
 
 ## What It Monitors
@@ -56,7 +56,7 @@ agentwatch install-service  # Install as systemd user service
 Telegram alerts with rate limiting (max 1 per monitor per 5 minutes):
 
 ```
-🔴 AgentWatch Alert
+🔴 ClawDoctor Alert
 Monitor: GatewayWatcher
 Event: Gateway process not found
 Action: openclaw gateway restart
@@ -68,7 +68,7 @@ Host: devbox
 
 ## Configuration
 
-Config lives at `~/.agentwatch/config.json`:
+Config lives at `~/.clawdoctor/config.json`:
 
 ```json
 {
@@ -96,15 +96,15 @@ Config lives at `~/.agentwatch/config.json`:
 }
 ```
 
-Events are stored in `~/.agentwatch/events.db` (SQLite) and retained for 7 days by default.
+Events are stored in `~/.clawdoctor/events.db` (SQLite) and retained for 7 days by default.
 
 ## Systemd
 
 ```bash
-agentwatch install-service
+clawdoctor install-service
 systemctl --user daemon-reload
-systemctl --user enable agentwatch
-systemctl --user start agentwatch
+systemctl --user enable clawdoctor
+systemctl --user start clawdoctor
 ```
 
 ## License

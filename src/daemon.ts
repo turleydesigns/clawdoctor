@@ -1,4 +1,4 @@
-import { AgentWatchConfig } from './config.js';
+import { ClawDoctorConfig } from './config.js';
 import { BaseWatcher, WatchResult } from './watchers/base.js';
 import { GatewayWatcher } from './watchers/gateway.js';
 import { CronWatcher } from './watchers/cron.js';
@@ -18,7 +18,7 @@ interface WatcherEntry {
 }
 
 export class Daemon {
-  private config: AgentWatchConfig;
+  private config: ClawDoctorConfig;
   private watchers: WatcherEntry[] = [];
   private alerter: TelegramAlerter;
   private processHealer: ProcessHealer;
@@ -26,7 +26,7 @@ export class Daemon {
   private running = false;
   private tickInterval: NodeJS.Timeout | null = null;
 
-  constructor(config: AgentWatchConfig) {
+  constructor(config: ClawDoctorConfig) {
     this.config = config;
     this.alerter = new TelegramAlerter(config);
     this.processHealer = new ProcessHealer(config);
@@ -78,7 +78,7 @@ export class Daemon {
     if (this.running) return;
     this.running = true;
 
-    console.log(`[${nowIso()}] AgentWatch daemon started`);
+    console.log(`[${nowIso()}] ClawDoctor daemon started`);
     console.log(`[${nowIso()}] Monitoring ${this.watchers.length} watcher(s)`);
 
     if (this.config.dryRun) {
@@ -107,7 +107,7 @@ export class Daemon {
       clearInterval(this.tickInterval);
       this.tickInterval = null;
     }
-    console.log(`[${nowIso()}] AgentWatch daemon stopped`);
+    console.log(`[${nowIso()}] ClawDoctor daemon stopped`);
   }
 
   private tick(): void {

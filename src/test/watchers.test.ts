@@ -3,15 +3,15 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { DEFAULT_CONFIG, AgentWatchConfig } from '../config.js';
+import { DEFAULT_CONFIG, ClawDoctorConfig } from '../config.js';
 import { GatewayWatcher } from '../watchers/gateway.js';
 import { CronWatcher } from '../watchers/cron.js';
 import { SessionWatcher } from '../watchers/session.js';
 import { CostWatcher } from '../watchers/cost.js';
 
-const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentwatch-watchers-test-'));
+const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'clawdoctor-watchers-test-'));
 
-function makeConfig(openclawPath = tmpDir): AgentWatchConfig {
+function makeConfig(openclawPath = tmpDir): ClawDoctorConfig {
   return { ...DEFAULT_CONFIG, openclawPath };
 }
 
@@ -38,41 +38,59 @@ describe('GatewayWatcher', () => {
 
 describe('CronWatcher', () => {
   before(() => {
-    fs.mkdirSync(path.join(tmpDir, 'state'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, 'cron'), { recursive: true });
   });
 
   it('returns ok when no cron files exist', async () => {
     const watcher = new CronWatcher(makeConfig());
     const results = await watcher.check();
     assert.ok(results.length >= 1);
-    assert.ok(results.some(r => r.event_type === 'cron_no_files' || r.event_type === 'cron_no_state_dir' || r.ok));
+    assert.ok(results.some(r => r.event_type === 'cron_no_file' || r.event_type === 'cron_none_enabled' || r.ok));
   });
 
   it('detects cron error state', async () => {
-    const cronFile = path.join(tmpDir, 'state', 'cron-test.json');
-    fs.writeFileSync(cronFile, JSON.stringify({
-      name: 'test-cron',
-      status: 'error',
-      lastRun: new Date().toISOString(),
-      lastError: 'Connection refused',
+    const jobsFile = path.join(tmpDir, 'cron', 'jobs.json');
+    fs.writeFileSync(jobsFile, JSON.stringify({
+      version: 1,
+      jobs: [{
+        id: 'test-1',
+        name: 'test-cron',
+        enabled: true,
+        schedule: { kind: 'cron', expr: '* * * * *' },
+        state: {
+          lastRunAtMs: Date.now(),
+          lastRunStatus: 'error',
+          consecutiveErrors: 3,
+        },
+      }],
     }));
 
     const watcher = new CronWatcher(makeConfig());
     const results = await watcher.check();
-    const errorResult = results.find(r => r.event_type === 'cron_error');
-    assert.ok(errorResult, `Expected cron_error, got: ${results.map(r => r.event_type).join(', ')}`);
+    const errorResult = results.find(r => r.event_type === 'cron_consecutive_errors');
+    assert.ok(errorResult, `Expected cron_consecutive_errors, got: ${results.map(r => r.event_type).join(', ')}`);
     assert.equal(errorResult.severity, 'error');
 
-    fs.unlinkSync(cronFile);
+    fs.unlinkSync(jobsFile);
   });
 
   it('detects overdue cron', async () => {
-    const cronFile = path.join(tmpDir, 'state', 'cron-overdue.json');
-    const twoHoursAgo = new Date(Date.now() - 2 * 3600 * 1000).toISOString();
-    fs.writeFileSync(cronFile, JSON.stringify({
-      name: 'overdue-cron',
-      lastRun: twoHoursAgo,
-      interval: 300, // expected every 5 minutes
+    const jobsFile = path.join(tmpDir, 'cron', 'jobs.json');
+    const twoHoursAgo = Date.now() - 2 * 3600 * 1000;
+    fs.writeFileSync(jobsFile, JSON.stringify({
+      version: 1,
+      jobs: [{
+        id: 'test-2',
+        name: 'overdue-cron',
+        enabled: true,
+        schedule: { kind: 'cron', expr: '*/5 * * * *' },
+        state: {
+          nextRunAtMs: twoHoursAgo,
+          lastRunAtMs: twoHoursAgo - 300000,
+          lastRunStatus: 'ok',
+          consecutiveErrors: 0,
+        },
+      }],
     }));
 
     const watcher = new CronWatcher(makeConfig());
@@ -80,23 +98,34 @@ describe('CronWatcher', () => {
     const overdueResult = results.find(r => r.event_type === 'cron_overdue');
     assert.ok(overdueResult, `Expected cron_overdue, got: ${results.map(r => r.event_type).join(', ')}`);
 
-    fs.unlinkSync(cronFile);
+    fs.unlinkSync(jobsFile);
   });
 
   it('passes healthy cron', async () => {
-    const cronFile = path.join(tmpDir, 'state', 'cron-healthy.json');
-    fs.writeFileSync(cronFile, JSON.stringify({
-      name: 'healthy-cron',
-      lastRun: new Date().toISOString(),
-      interval: 3600,
+    const jobsFile = path.join(tmpDir, 'cron', 'jobs.json');
+    fs.writeFileSync(jobsFile, JSON.stringify({
+      version: 1,
+      jobs: [{
+        id: 'test-3',
+        name: 'healthy-cron',
+        enabled: true,
+        schedule: { kind: 'cron', expr: '0 * * * *' },
+        state: {
+          nextRunAtMs: Date.now() + 3600000,
+          lastRunAtMs: Date.now() - 1800000,
+          lastRunStatus: 'ok',
+          consecutiveErrors: 0,
+          lastDeliveryStatus: 'delivered',
+        },
+      }],
     }));
 
     const watcher = new CronWatcher(makeConfig());
     const results = await watcher.check();
-    const okResult = results.find(r => r.event_type === 'cron_ok' && r.message.includes('healthy-cron'));
-    assert.ok(okResult, `Expected cron_ok, got: ${results.map(r => r.event_type + ':' + r.message).join(', ')}`);
+    const okResult = results.find(r => r.event_type === 'cron_all_ok');
+    assert.ok(okResult, `Expected cron_all_ok, got: ${results.map(r => r.event_type + ':' + r.message).join(', ')}`);
 
-    fs.unlinkSync(cronFile);
+    fs.unlinkSync(jobsFile);
   });
 });
 

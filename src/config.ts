@@ -21,7 +21,7 @@ export interface AlertsConfig {
   telegram: TelegramConfig;
 }
 
-export interface AgentWatchConfig {
+export interface ClawDoctorConfig {
   openclawPath: string;
   watchers: {
     gateway: WatcherConfig;
@@ -39,12 +39,12 @@ export interface AgentWatchConfig {
   retentionDays: number;
 }
 
-export const AGENTWATCH_DIR = path.join(os.homedir(), '.agentwatch');
+export const AGENTWATCH_DIR = path.join(os.homedir(), '.clawdoctor');
 export const CONFIG_PATH = path.join(AGENTWATCH_DIR, 'config.json');
 export const DB_PATH = path.join(AGENTWATCH_DIR, 'events.db');
-export const PID_PATH = path.join(AGENTWATCH_DIR, 'agentwatch.pid');
+export const PID_PATH = path.join(AGENTWATCH_DIR, 'clawdoctor.pid');
 
-export const DEFAULT_CONFIG: AgentWatchConfig = {
+export const DEFAULT_CONFIG: ClawDoctorConfig = {
   openclawPath: path.join(os.homedir(), '.openclaw'),
   watchers: {
     gateway: { enabled: true, interval: 30 },
@@ -68,16 +68,16 @@ export const DEFAULT_CONFIG: AgentWatchConfig = {
   retentionDays: 7,
 };
 
-export function loadConfig(): AgentWatchConfig {
+export function loadConfig(): ClawDoctorConfig {
   if (!fs.existsSync(CONFIG_PATH)) {
-    throw new Error(`Config not found at ${CONFIG_PATH}. Run 'agentwatch init' first.`);
+    throw new Error(`Config not found at ${CONFIG_PATH}. Run 'clawdoctor init' first.`);
   }
   const raw = fs.readFileSync(CONFIG_PATH, 'utf-8');
-  const parsed = JSON.parse(raw) as Partial<AgentWatchConfig>;
+  const parsed = JSON.parse(raw) as Partial<ClawDoctorConfig>;
   return mergeConfig(DEFAULT_CONFIG, parsed);
 }
 
-function mergeConfig(defaults: AgentWatchConfig, overrides: Partial<AgentWatchConfig>): AgentWatchConfig {
+function mergeConfig(defaults: ClawDoctorConfig, overrides: Partial<ClawDoctorConfig>): ClawDoctorConfig {
   return {
     ...defaults,
     ...overrides,
@@ -94,7 +94,7 @@ function mergeConfig(defaults: AgentWatchConfig, overrides: Partial<AgentWatchCo
   };
 }
 
-export function saveConfig(config: AgentWatchConfig): void {
+export function saveConfig(config: ClawDoctorConfig): void {
   ensureAgentwatchDir();
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf-8');
 }

@@ -1,10 +1,10 @@
 {
-  "name": "agentwatch",
+  "name": "clawdoctor",
   "version": "0.1.0",
-  "description": "Self-healing monitor for OpenClaw — watches gateway, crons, and sessions, sends Telegram alerts, and auto-fixes what it can",
+  "description": "Self-healing doctor for OpenClaw. Watches gateway, crons, and sessions, sends Telegram alerts, and auto-fixes what it can.",
   "main": "dist/index.js",
   "bin": {
-    "agentwatch": "dist/index.js"
+    "clawdoctor": "dist/index.js"
   },
   "scripts": {
     "build": "tsc",
@@ -13,7 +13,13 @@
     "test:src": "npx ts-node --test src/test/**/*.ts",
     "prepublishOnly": "npm run build"
   },
-  "keywords": ["openclaw", "monitor", "cli", "agent", "self-healing"],
+  "keywords": [
+    "openclaw",
+    "monitor",
+    "cli",
+    "agent",
+    "self-healing"
+  ],
   "author": "Matt Turley",
   "license": "MIT",
   "dependencies": {
@@ -31,5 +37,10 @@
   "files": [
     "dist/**/*",
     "README.md"
-  ]
+  ],
+  "homepage": "https://clawdoctor.dev",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/turleydesigns/clawdoctor.git"
+  }
 }
