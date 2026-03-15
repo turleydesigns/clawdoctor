@@ -51,7 +51,7 @@ describe('Config', () => {
 
   it('configExists returns false when no config file', async () => {
     const { configExists } = await import('../config.js');
-    // configExists checks the real AGENTWATCH_DIR — just verify it's a boolean
+    // configExists checks the real AGENTWATCH_DIR. Just verify it's a boolean.
     const result = configExists();
     assert.equal(typeof result, 'boolean');
   });

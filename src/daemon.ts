@@ -7,9 +7,12 @@ import { AuthWatcher } from './watchers/auth.js';
 import { CostWatcher } from './watchers/cost.js';
 import { ProcessHealer } from './healers/process.js';
 import { CronHealer } from './healers/cron.js';
+import { AuthHealer } from './healers/auth.js';
+import { SessionHealer } from './healers/session.js';
+import { HealResult } from './healers/base.js';
 import { TelegramAlerter } from './alerters/telegram.js';
 import { pruneOldEvents } from './store.js';
-import { nowIso } from './utils.js';
+import { nowIso, runShell } from './utils.js';
 
 interface WatcherEntry {
   watcher: BaseWatcher;
@@ -33,16 +36,21 @@ export class Daemon {
   private alerter: TelegramAlerter;
   private processHealer: ProcessHealer;
   private cronHealer: CronHealer;
+  private authHealer: AuthHealer;
+  private sessionHealer: SessionHealer;
   private running = false;
   private tickInterval: NodeJS.Timeout | null = null;
   private plan: Plan = 'free';
   private licenseCheckInterval: NodeJS.Timeout | null = null;
+  private callbackPollInterval: NodeJS.Timeout | null = null;
 
   constructor(config: ClawDoctorConfig) {
     this.config = config;
     this.alerter = new TelegramAlerter(config);
     this.processHealer = new ProcessHealer(config);
     this.cronHealer = new CronHealer(config);
+    this.authHealer = new AuthHealer(config);
+    this.sessionHealer = new SessionHealer(config);
     this.plan = loadLicense()?.plan ?? 'free';
     this.setupWatchers();
   }
@@ -116,6 +124,13 @@ export class Daemon {
     // Tick every 5 seconds to check if any watcher is due
     this.tickInterval = setInterval(() => this.tick(), 5000);
 
+    // Poll Telegram callback queries every 10 seconds
+    this.callbackPollInterval = setInterval(() => {
+      this.alerter.pollCallbacks().catch(err => {
+        console.error(`[${nowIso()}] Callback poll error:`, err);
+      });
+    }, 10000);
+
     // Prune old events daily
     setInterval(() => {
       const pruned = pruneOldEvents(this.config.retentionDays);
@@ -146,6 +161,10 @@ export class Daemon {
     if (this.licenseCheckInterval) {
       clearInterval(this.licenseCheckInterval);
       this.licenseCheckInterval = null;
+    }
+    if (this.callbackPollInterval) {
+      clearInterval(this.callbackPollInterval);
+      this.callbackPollInterval = null;
     }
     console.log(`[${nowIso()}] ClawDoctor daemon stopped`);
   }
@@ -183,10 +202,63 @@ export class Daemon {
     // Auto-healing
     if (!result.ok) {
       const healResult = await this.attemptHeal(watcher, result);
-      if (healResult && this.alerter.shouldAlert(result)) {
-        await this.alerter.sendAlert({ watcher: watcher.name, result, healResult });
+      if (healResult) {
+        // Yellow tier with approval needed: send inline keyboard
+        if (healResult.requiresApproval && healResult.approvalOptions) {
+          await this.sendApprovalRequest(watcher.name, healResult);
+        } else if (this.alerter.shouldAlert(result)) {
+          await this.alerter.sendAlert({ watcher: watcher.name, result, healResult });
+        }
       } else if (this.alerter.shouldAlert(result)) {
         await this.alerter.sendAlert({ watcher: watcher.name, result });
+      }
+    }
+  }
+
+  private async sendApprovalRequest(watcherName: string, healResult: HealResult): Promise<void> {
+    const options = healResult.approvalOptions ?? [];
+    const { text, buttons } = this.alerter.formatApprovalMessage(
+      watcherName,
+      healResult.message,
+      options
+    );
+
+    const handlers: Record<string, () => Promise<void>> = {};
+
+    for (const option of options) {
+      const cbData = option.callbackData;
+      handlers[cbData] = async () => {
+        await this.handleCallbackAction(cbData);
+      };
+    }
+
+    await this.alerter.sendWithButtons(text, buttons, handlers);
+  }
+
+  private async handleCallbackAction(callbackData: string): Promise<void> {
+    console.log(`[${nowIso()}] [Daemon] Handling callback: ${callbackData}`);
+    const parts = callbackData.split(':');
+    const [resource, action, ...args] = parts;
+
+    if (resource === 'cron') {
+      const cronName = args[0] ?? 'unknown';
+      if (action === 'retry') {
+        const result = runShell(`openclaw cron run ${cronName}`);
+        console.log(`[${nowIso()}] [CronHealer] Retry ${cronName}: ${result.ok ? 'success' : 'failed'}`);
+      } else if (action === 'disable') {
+        const result = runShell(`openclaw cron disable ${cronName}`);
+        console.log(`[${nowIso()}] [CronHealer] Disable ${cronName}: ${result.ok ? 'success' : 'failed'}`);
+      } else if (action === 'ignore') {
+        console.log(`[${nowIso()}] [CronHealer] Ignored alert for ${cronName}`);
+      }
+    } else if (resource === 'session') {
+      const agent = args[0] ?? 'unknown';
+      const session = args[1] ?? 'unknown';
+      if (action === 'kill') {
+        const result = runShell(`openclaw session kill ${agent} ${session}`);
+        console.log(`[${nowIso()}] [SessionHealer] Kill ${agent}/${session}: ${result.ok ? 'success' : 'failed'}`);
+      } else if (action === 'ignore') {
+        console.log(`[${nowIso()}] [SessionHealer] Ignored alert for ${agent}/${session}`);
       }
     }
   }
@@ -194,7 +266,7 @@ export class Daemon {
   private async attemptHeal(
     watcher: BaseWatcher,
     result: WatchResult
-  ): Promise<import('./healers/base.js').HealResult | null> {
+  ): Promise<HealResult | null> {
     const autoFixAllowed = AUTO_FIX_PLANS.includes(this.plan);
 
     if (watcher.name === 'GatewayWatcher' && result.event_type === 'gateway_down') {
@@ -208,10 +280,35 @@ export class Daemon {
       }
     }
 
-    if (watcher.name === 'CronWatcher' && (result.event_type === 'cron_error' || result.event_type === 'cron_overdue')) {
-      const context = result.details ?? {};
-      const healResult = await this.cronHealer.heal(context as Record<string, unknown>);
-      return healResult;
+    if (watcher.name === 'CronWatcher' && (result.event_type === 'cron_consecutive_errors' || result.event_type === 'cron_overdue' || result.event_type === 'cron_last_error')) {
+      if (this.config.healers.cronRetry.enabled && autoFixAllowed) {
+        const context = result.details ?? {};
+        const healResult = await this.cronHealer.heal(context as Record<string, unknown>);
+        console.log(`[${nowIso()}] [CronHealer] ${healResult.success ? 'SUCCESS' : 'FAILED'}: ${healResult.message}`);
+        return healResult;
+      } else if (!autoFixAllowed) {
+        // Still log, even on non-heal plans
+        const context = result.details ?? {};
+        return await this.cronHealer.heal(context as Record<string, unknown>);
+      }
+    }
+
+    if (watcher.name === 'AuthWatcher' && result.event_type === 'auth_failure') {
+      if (this.config.healers.auth.enabled && autoFixAllowed) {
+        const context = result.details ?? {};
+        const healResult = await this.authHealer.heal(context as Record<string, unknown>);
+        console.log(`[${nowIso()}] [AuthHealer] ${healResult.success ? 'SUCCESS' : 'FAILED'}: ${healResult.message}`);
+        return healResult;
+      }
+    }
+
+    if (watcher.name === 'SessionWatcher' && (result.event_type === 'session_stuck' || result.event_type === 'session_error')) {
+      if (this.config.healers.session.enabled && autoFixAllowed) {
+        const context = result.details ?? {};
+        const healResult = await this.sessionHealer.heal(context as Record<string, unknown>);
+        console.log(`[${nowIso()}] [SessionHealer] ${healResult.success ? 'SUCCESS' : 'FAILED'}: ${healResult.message}`);
+        return healResult;
+      }
     }
 
     return null;

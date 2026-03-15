@@ -75,7 +75,7 @@ export class CostWatcher extends BaseWatcher {
     if (anomalies.length === 0) {
       results.push(
         this.ok(
-          `Cost normal — avg $${avgCost.toFixed(4)}/session, ${recentSessions.length} recent session(s) checked`,
+          `Cost normal, avg $${avgCost.toFixed(4)}/session, ${recentSessions.length} recent session(s) checked`,
           'cost_ok'
         )
       );

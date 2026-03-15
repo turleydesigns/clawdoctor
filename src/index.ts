@@ -22,6 +22,8 @@ import {
 import { Daemon } from './daemon.js';
 import { getRecentEvents, pruneOldEvents } from './store.js';
 import { nowIso, runShell } from './utils.js';
+import { listSnapshots, executeRollback } from './snapshots.js';
+import { getRecentAudit } from './audit.js';
 
 const pkg = { version: '0.1.0' };
 
@@ -138,8 +140,10 @@ program
         cost: { enabled: enableCost, interval: 300 },
       },
       healers: {
-        processRestart: { enabled: enableProcessRestart },
-        cronRetry: { enabled: false },
+        processRestart: { enabled: enableProcessRestart, dryRun: false },
+        cronRetry: { enabled: true, dryRun: false },
+        auth: { enabled: true, dryRun: true },
+        session: { enabled: true, dryRun: true },
       },
       alerts: {
         telegram: {
@@ -422,6 +426,105 @@ program
 
     if (plan === 'free') {
       console.log('\n💡 Upgrade at https://clawdoctor.dev/#pricing');
+    }
+    console.log('');
+  });
+
+// ── snapshots ─────────────────────────────────────────────────────────────────
+program
+  .command('snapshots')
+  .description('List recent config snapshots taken before auto-fix actions')
+  .option('-n, --lines <number>', 'Number of snapshots to show', '20')
+  .action((opts: { lines: string }) => {
+    const limit = parseInt(opts.lines, 10);
+    const snapshots = listSnapshots().slice(0, limit);
+
+    if (snapshots.length === 0) {
+      console.log('No snapshots found. Snapshots are created before auto-fix actions.');
+      return;
+    }
+
+    console.log(`\nConfig Snapshots (${snapshots.length})\n`);
+    console.log(`${'ID'.padEnd(40)}  ${'Action'.padEnd(20)}  ${'Target'.padEnd(30)}  Timestamp`);
+    console.log('─'.repeat(110));
+    for (const { id, snapshot } of snapshots) {
+      const ts = snapshot.timestamp.slice(0, 19).replace('T', ' ');
+      console.log(
+        `${id.padEnd(40)}  ${snapshot.action.padEnd(20)}  ${snapshot.target.padEnd(30)}  ${ts}`
+      );
+    }
+    console.log(`\nRun 'clawdoctor rollback <id>' to execute a rollback.\n`);
+  });
+
+// ── rollback ──────────────────────────────────────────────────────────────────
+program
+  .command('rollback <snapshot-id>')
+  .description('Rollback to a previous state using a snapshot')
+  .option('--dry-run', 'Show what would be executed without running it')
+  .action((snapshotId: string, opts: { dryRun?: boolean }) => {
+    const snapshots = listSnapshots();
+    const found = snapshots.find(s => s.id === snapshotId);
+
+    if (!found) {
+      console.error(`Snapshot '${snapshotId}' not found.`);
+      console.error(`Run 'clawdoctor snapshots' to list available snapshots.`);
+      process.exit(1);
+    }
+
+    const { snapshot } = found;
+    console.log(`\nSnapshot: ${snapshotId}`);
+    console.log(`Action:   ${snapshot.action}`);
+    console.log(`Target:   ${snapshot.target}`);
+    console.log(`Taken:    ${snapshot.timestamp.slice(0, 19).replace('T', ' ')}`);
+    console.log(`Rollback: ${snapshot.rollbackCommand}`);
+
+    if (opts.dryRun) {
+      console.log('\n[DRY RUN] Would execute rollback command above.');
+      return;
+    }
+
+    console.log('\nExecuting rollback...');
+    const result = executeRollback(snapshotId);
+
+    if (result.success) {
+      console.log(`✅ ${result.message}`);
+    } else {
+      console.error(`❌ ${result.message}`);
+      process.exit(1);
+    }
+  });
+
+// ── audit ─────────────────────────────────────────────────────────────────────
+program
+  .command('audit')
+  .description('Show recent healer actions from the audit trail')
+  .option('-n, --lines <number>', 'Number of entries to show', '50')
+  .action((opts: { lines: string }) => {
+    const limit = parseInt(opts.lines, 10);
+    const entries = getRecentAudit(limit);
+
+    if (entries.length === 0) {
+      console.log('No audit entries found. Entries are recorded when healers take action.');
+      return;
+    }
+
+    console.log(`\nHealer Audit Trail (${entries.length} entries)\n`);
+    console.log(
+      `${'Timestamp'.padEnd(20)}  ${'Healer'.padEnd(16)}  ${'Tier'.padEnd(7)}  ${'Action'.padEnd(22)}  ${'Target'.padEnd(30)}  Result`
+    );
+    console.log('─'.repeat(120));
+    for (const entry of entries) {
+      const ts = entry.timestamp.slice(0, 19).replace('T', ' ');
+      const tierIcon = entry.tier === 'green' ? '🟢' : '🟡';
+      const resultIcon = entry.result === 'success' ? '✅' :
+        entry.result === 'failed' ? '❌' :
+        entry.result === 'dry-run' ? '🔵' : '⏳';
+      console.log(
+        `${ts.padEnd(20)}  ${entry.healer.padEnd(16)}  ${(tierIcon + ' ' + entry.tier).padEnd(9)}  ${entry.action.padEnd(22)}  ${entry.target.padEnd(30)}  ${resultIcon} ${entry.result}`
+      );
+      if (entry.snapshotId) {
+        console.log(`${''.padEnd(20)}  Snapshot: ${entry.snapshotId}`);
+      }
     }
     console.log('');
   });

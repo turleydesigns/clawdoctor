@@ -10,6 +10,7 @@ export interface WatcherConfig {
 
 export interface HealerConfig {
   enabled: boolean;
+  dryRun?: boolean;
 }
 
 export interface TelegramConfig {
@@ -34,6 +35,8 @@ export interface ClawDoctorConfig {
   healers: {
     processRestart: HealerConfig;
     cronRetry: HealerConfig;
+    auth: HealerConfig;
+    session: HealerConfig;
   };
   alerts: AlertsConfig;
   dryRun: boolean;
@@ -45,6 +48,8 @@ export const CONFIG_PATH = path.join(AGENTWATCH_DIR, 'config.json');
 export const DB_PATH = path.join(AGENTWATCH_DIR, 'events.db');
 export const PID_PATH = path.join(AGENTWATCH_DIR, 'clawdoctor.pid');
 export const LICENSE_PATH = path.join(AGENTWATCH_DIR, 'license.json');
+export const SNAPSHOTS_DIR = path.join(AGENTWATCH_DIR, 'snapshots');
+export const AUDIT_PATH = path.join(AGENTWATCH_DIR, 'audit.jsonl');
 
 export type Plan = 'free' | 'diagnose' | 'heal';
 
@@ -156,8 +161,10 @@ export const DEFAULT_CONFIG: ClawDoctorConfig = {
     cost: { enabled: true, interval: 300 },
   },
   healers: {
-    processRestart: { enabled: true },
-    cronRetry: { enabled: false },
+    processRestart: { enabled: true, dryRun: false },
+    cronRetry: { enabled: true, dryRun: false },
+    auth: { enabled: true, dryRun: true },
+    session: { enabled: true, dryRun: true },
   },
   alerts: {
     telegram: {
@@ -180,11 +187,17 @@ export function loadConfig(): ClawDoctorConfig {
 }
 
 function mergeConfig(defaults: ClawDoctorConfig, overrides: Partial<ClawDoctorConfig>): ClawDoctorConfig {
+  const overrideHealers = (overrides.healers ?? {}) as Partial<ClawDoctorConfig['healers']>;
   return {
     ...defaults,
     ...overrides,
     watchers: { ...defaults.watchers, ...(overrides.watchers ?? {}) },
-    healers: { ...defaults.healers, ...(overrides.healers ?? {}) },
+    healers: {
+      processRestart: { ...defaults.healers.processRestart, ...(overrideHealers.processRestart ?? {}) },
+      cronRetry: { ...defaults.healers.cronRetry, ...(overrideHealers.cronRetry ?? {}) },
+      auth: { ...defaults.healers.auth, ...(overrideHealers.auth ?? {}) },
+      session: { ...defaults.healers.session, ...(overrideHealers.session ?? {}) },
+    },
     alerts: {
       ...defaults.alerts,
       ...(overrides.alerts ?? {}),

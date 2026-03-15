@@ -99,7 +99,7 @@ export class CronWatcher extends BaseWatcher {
         if (overdueMs > 30 * 60 * 1000) {
           results.push(
             this.warn(
-              `Cron '${name}' overdue — was expected ${Math.round(overdueMs / 60000)}m ago`,
+              `Cron '${name}' overdue, was expected ${Math.round(overdueMs / 60000)}m ago`,
               'cron_overdue',
               { cronName: name, jobId: job.id, nextRunAtMs: state.nextRunAtMs, overdueMs }
             )
