@@ -25,7 +25,7 @@ import { nowIso, runShell } from './utils.js';
 import { listSnapshots, executeRollback } from './snapshots.js';
 import { getRecentAudit } from './audit.js';
 
-const pkg = { version: '0.1.0' };
+const pkg = { version: '0.3.1' };
 
 const program = new Command();
 
@@ -93,9 +93,9 @@ program
     let chatId = opts.telegramChat ?? '';
     if (!nonInteractive) {
       console.log('\n📱 Telegram Alerts (optional, press Enter to skip)\n');
-      botToken = await ask('Telegram bot token (leave blank to skip)');
+      botToken = await ask('Telegram bot token (leave blank to skip)', botToken);
       if (botToken) {
-        chatId = await ask('Telegram chat ID');
+        chatId = await ask('Telegram chat ID', chatId);
       }
     }
 
