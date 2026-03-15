@@ -1,6 +1,6 @@
 import fs from 'fs';
 import { BaseHealer, HealResult } from './base.js';
-import { runShell } from '../utils.js';
+import { runCommand } from '../utils.js';
 
 const STUCK_THRESHOLD_SECONDS = 2 * 3600; // 2 hours
 const HIGH_COST_THRESHOLD_USD = 10;
@@ -74,7 +74,7 @@ export class SessionHealer extends BaseHealer {
         `echo "Session ${session} was killed - restore manually if needed"`
       );
 
-      const killResult = runShell(`openclaw session kill ${agent} ${session} 2>&1`);
+      const killResult = runCommand('openclaw', ['session', 'kill', agent, session]);
 
       if (killResult.ok) {
         const result: HealResult = {

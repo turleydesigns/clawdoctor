@@ -1,5 +1,5 @@
 import { BaseHealer, HealResult } from './base.js';
-import { runShell } from '../utils.js';
+import { runCommand } from '../utils.js';
 
 const TRANSIENT_ERROR_PATTERNS = [
   /network/i,
@@ -20,21 +20,37 @@ function isTransientError(errorMsg: string): boolean {
 export class CronHealer extends BaseHealer {
   readonly name = 'CronHealer';
 
+  // Track our own consecutive failure count per cron (independent of OpenClaw's counter)
+  private failureCounts: Map<string, number> = new Map();
+  private lastRetryTime: Map<string, number> = new Map();
+
+  private static readonly RETRY_COOLDOWN_MS = 10 * 60 * 1000; // 10 min between retries
+  private static readonly AUTO_RETRY_THRESHOLD = 3; // retry after 3 consecutive detections
+  private static readonly APPROVAL_THRESHOLD = 6; // ask user after 6 consecutive detections
+
   async heal(context: Record<string, unknown>): Promise<HealResult> {
     const cronName = (context.cronName as string | undefined) ?? 'unknown';
-    const consecutiveErrors = (context.consecutiveErrors as number | undefined) ?? 0;
+    const openclawConsecutive = (context.consecutiveErrors as number | undefined) ?? 0;
     const lastError = (context.lastError as string | undefined) ?? '';
+    const lastRunStatus = (context.lastRunStatus as string | undefined) ?? '';
     const lastRun = (context.lastRun as string | undefined) ?? 'unknown';
     const dryRun = this.isEffectiveDryRun(this.config.healers.cronRetry.dryRun);
 
-    // Yellow tier: 5+ consecutive errors, ask via Telegram
-    if (consecutiveErrors >= 5) {
+    // Track our own failure count
+    const currentCount = (this.failureCounts.get(cronName) ?? 0) + 1;
+    this.failureCounts.set(cronName, currentCount);
+
+    // Use the higher of OpenClaw's count or our own
+    const consecutiveErrors = Math.max(openclawConsecutive, currentCount);
+
+    // Yellow tier: persistent failures, ask via Telegram
+    if (consecutiveErrors >= CronHealer.APPROVAL_THRESHOLD) {
       if (dryRun) {
         this.writeAudit('cron-ask', cronName, 'yellow', 'dry-run');
         return {
           success: true,
           action: `dry-run: would send Telegram approval for '${cronName}'`,
-          message: `[DRY RUN] Would request approval for cron '${cronName}' (${consecutiveErrors} errors)`,
+          message: `[DRY RUN] Would request approval for cron '${cronName}' (${consecutiveErrors} failures detected)`,
           tier: 'yellow',
         };
       }
@@ -42,7 +58,7 @@ export class CronHealer extends BaseHealer {
       const result: HealResult = {
         success: true,
         action: `requested approval for cron '${cronName}'`,
-        message: `Cron '${cronName}' has ${consecutiveErrors} consecutive errors. Approval requested.`,
+        message: `Cron '${cronName}' has failed ${consecutiveErrors} times. Approval requested.`,
         details: { cronName, consecutiveErrors, lastError, lastRun },
         tier: 'yellow',
         requiresApproval: true,
@@ -56,56 +72,73 @@ export class CronHealer extends BaseHealer {
       return result;
     }
 
-    // Green tier: re-enable if it was auto-disabled due to transient errors
-    const transient = isTransientError(lastError);
+    // Green tier: auto-retry after threshold, with cooldown
+    if (consecutiveErrors >= CronHealer.AUTO_RETRY_THRESHOLD) {
+      const lastRetry = this.lastRetryTime.get(cronName) ?? 0;
+      const now = Date.now();
 
-    if (consecutiveErrors >= 3 && transient) {
-      if (dryRun) {
-        this.writeAudit('cron-retry', cronName, 'green', 'dry-run');
+      if (now - lastRetry < CronHealer.RETRY_COOLDOWN_MS) {
+        // Still in cooldown, just log
+        this.writeAudit('cron-log', cronName, 'green', 'cooldown');
         return {
           success: true,
-          action: `dry-run: would re-enable '${cronName}'`,
-          message: `[DRY RUN] Would re-enable cron '${cronName}' (transient error)`,
+          action: `retry cooldown for '${cronName}'`,
+          message: `Cron '${cronName}' still failing (${consecutiveErrors}x). Next retry in ${Math.round((CronHealer.RETRY_COOLDOWN_MS - (now - lastRetry)) / 60000)}m.`,
           tier: 'green',
         };
       }
 
+      if (dryRun) {
+        this.writeAudit('cron-retry', cronName, 'green', 'dry-run');
+        return {
+          success: true,
+          action: `dry-run: would retry '${cronName}'`,
+          message: `[DRY RUN] Would retry cron '${cronName}' (${consecutiveErrors} failures)`,
+          tier: 'green',
+        };
+      }
+
+      // Take snapshot and retry
       const snapshotId = this.takeSnapshot(
         'cron-retry',
         cronName,
-        { consecutiveErrors, lastError, lastRun },
+        { consecutiveErrors, lastError, lastRun, lastRunStatus },
         `openclaw cron disable ${cronName}`
       );
 
-      const enableResult = runShell(`openclaw cron enable ${cronName}`);
-      if (enableResult.ok) {
+      const retryResult = runCommand('openclaw', ['cron', 'run', cronName]);
+      this.lastRetryTime.set(cronName, now);
+
+      if (retryResult.ok) {
+        // Reset failure count on successful retry dispatch
+        this.failureCounts.set(cronName, 0);
         const result: HealResult = {
           success: true,
-          action: `openclaw cron enable ${cronName}`,
-          message: `Cron '${cronName}' re-enabled after transient error`,
+          action: `openclaw cron run ${cronName}`,
+          message: `Cron '${cronName}' retried after ${consecutiveErrors} failures`,
           details: { cronName, consecutiveErrors, lastError, snapshotId },
           tier: 'green',
           snapshotId,
         };
-        await this.recordHeal('CronWatcher', result, 'cron_reenabled');
+        await this.recordHeal('CronWatcher', result, 'cron_retried');
         this.writeAudit('cron-retry', cronName, 'green', 'success', snapshotId);
         return result;
       }
 
       const result: HealResult = {
         success: false,
-        action: `openclaw cron enable ${cronName}`,
-        message: `Failed to re-enable cron '${cronName}': ${enableResult.stderr.slice(0, 200)}`,
+        action: `openclaw cron run ${cronName}`,
+        message: `Failed to retry cron '${cronName}': ${retryResult.stderr.slice(0, 200)}`,
         details: { cronName, consecutiveErrors, lastError, snapshotId },
         tier: 'green',
         snapshotId,
       };
-      await this.recordHeal('CronWatcher', result, 'cron_reenable_failed');
+      await this.recordHeal('CronWatcher', result, 'cron_retry_failed');
       this.writeAudit('cron-retry', cronName, 'green', 'failed', snapshotId);
       return result;
     }
 
-    // Default: log and suggest manual rerun
+    // Below threshold: just log with manual rerun command
     const manualCommand = cronName !== 'unknown'
       ? `openclaw cron run ${cronName}`
       : 'openclaw cron run <cron-name>';
@@ -113,12 +146,18 @@ export class CronHealer extends BaseHealer {
     const result: HealResult = {
       success: true,
       action: `logged cron failure for '${cronName}'`,
-      message: `Cron '${cronName}' failed${lastError ? `: ${lastError}` : ''}. Last run: ${lastRun}. Manual rerun: \`${manualCommand}\``,
-      details: { cronName, lastRun, lastError, manualCommand },
+      message: `Cron '${cronName}' failed (${consecutiveErrors}/${CronHealer.AUTO_RETRY_THRESHOLD} before auto-retry)${lastError ? `: ${lastError}` : ''}. Manual: \`${manualCommand}\``,
+      details: { cronName, lastRun, lastError, manualCommand, consecutiveErrors },
       tier: 'green',
     };
     await this.recordHeal('CronWatcher', result, 'cron_failure_logged');
     this.writeAudit('cron-log', cronName, 'green', 'success');
     return result;
+  }
+
+  // Reset count when a cron starts passing again (called externally if needed)
+  resetFailureCount(cronName: string): void {
+    this.failureCounts.delete(cronName);
+    this.lastRetryTime.delete(cronName);
   }
 }

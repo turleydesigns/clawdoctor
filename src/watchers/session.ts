@@ -13,6 +13,10 @@ interface SessionEntry {
 
 const MAX_SESSION_AGE_HOURS = 4;
 const SESSION_TIMEOUT_SECONDS = MAX_SESSION_AGE_HOURS * 3600;
+const STUCK_WARNING_SECONDS = 30 * 60;   // warn after 30min no modification
+const STUCK_RECENT_SECONDS = 5 * 60;    // not stuck if modified within 5min
+const STUCK_KILL_SECONDS = 2 * 3600;    // kill threshold: 2h no modification
+const SILENT_COMPLETION_DURATION_SECONDS = 30; // flag if completed in <30s with 0 tool calls
 
 export class SessionWatcher extends BaseWatcher {
   readonly name = 'SessionWatcher';
@@ -61,23 +65,25 @@ export class SessionWatcher extends BaseWatcher {
 
         try {
           const stat = fs.statSync(sessionPath);
+          // ageSec = time since last modification
           const ageSec = fileAgeSeconds(stat.mtime);
 
-          // Only check recent sessions (< 4 hours old)
+          // Only check sessions modified within the last 4 hours
           if (ageSec > SESSION_TIMEOUT_SECONDS) continue;
 
           const lines = fs.readFileSync(sessionPath, 'utf-8')
             .split('\n')
-            .filter(l => l.trim())
-            .slice(-50); // last 50 entries
+            .filter(l => l.trim());
 
           const entries = lines.map(line => {
             try { return JSON.parse(line) as SessionEntry; }
             catch { return null; }
           }).filter((e): e is SessionEntry => e !== null);
 
+          const recentEntries = entries.slice(-50);
+
           // Check for errors
-          const errorEntries = entries.filter(e => e.type === 'error' || e.error || e.status === 'error');
+          const errorEntries = recentEntries.filter(e => e.type === 'error' || e.error || e.status === 'error');
           if (errorEntries.length > 0) {
             const lastError = errorEntries[errorEntries.length - 1];
             results.push(
@@ -91,7 +97,7 @@ export class SessionWatcher extends BaseWatcher {
           }
 
           // Check for aborted sessions
-          const abortedEntries = entries.filter(e => e.status === 'aborted' || e.type === 'abort');
+          const abortedEntries = recentEntries.filter(e => e.status === 'aborted' || e.type === 'abort');
           if (abortedEntries.length > 0) {
             results.push(
               this.warn(
@@ -103,12 +109,35 @@ export class SessionWatcher extends BaseWatcher {
             continue;
           }
 
-          // Check for sessions that ran too long (still active but file is old)
           const lastEntry = entries[entries.length - 1];
-          if (lastEntry?.type !== 'end' && lastEntry?.status !== 'complete' && ageSec > 3600) {
+          const isCompleted = lastEntry?.type === 'end' || lastEntry?.status === 'complete';
+
+          // Silent completion: completed with 0 tool calls and lasted > 30 seconds
+          if (isCompleted) {
+            const toolCallCount = entries.filter(e => e.type === 'tool_call').length;
+            const durationSec = (stat.mtime.getTime() - stat.birthtime.getTime()) / 1000;
+            if (toolCallCount === 0 && durationSec > SILENT_COMPLETION_DURATION_SECONDS) {
+              results.push(
+                this.warn(
+                  `Session in agent '${agentDir}' completed but made 0 tool calls (possible silent failure)`,
+                  'session_silent_completion',
+                  { agent: agentDir, session: sessionFile, durationSec }
+                )
+              );
+            }
+            continue;
+          }
+
+          // Stuck detection: no end/complete entry, use mtime for activity check
+          // Not stuck if modified within the last 5 minutes
+          if (ageSec <= STUCK_RECENT_SECONDS) continue;
+
+          // Kill threshold: 2 hours of no modification
+          const stuckAgeSec = ageSec >= STUCK_KILL_SECONDS ? ageSec : (ageSec >= STUCK_WARNING_SECONDS ? ageSec : 0);
+          if (stuckAgeSec > 0) {
             results.push(
               this.warn(
-                `Session in agent '${agentDir}' may be stuck (running for ${Math.round(ageSec / 60)}m)`,
+                `Session in agent '${agentDir}' may be stuck (no activity for ${Math.round(ageSec / 60)}m)`,
                 'session_stuck',
                 { agent: agentDir, session: sessionFile, ageSec }
               )

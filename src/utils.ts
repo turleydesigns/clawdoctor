@@ -1,4 +1,4 @@
-import { execSync, spawnSync } from 'child_process';
+import { execSync, execFileSync } from 'child_process';
 import os from 'os';
 
 export function nowIso(): string {
@@ -13,13 +13,14 @@ export function hostname(): string {
   return os.hostname();
 }
 
-export function runCommand(cmd: string, args: string[] = []): { stdout: string; stderr: string; status: number } {
-  const result = spawnSync(cmd, args, { encoding: 'utf-8', timeout: 15000 });
-  return {
-    stdout: result.stdout ?? '',
-    stderr: result.stderr ?? '',
-    status: result.status ?? -1,
-  };
+export function runCommand(bin: string, args: string[] = []): { stdout: string; stderr: string; ok: boolean } {
+  try {
+    const stdout = execFileSync(bin, args, { encoding: 'utf-8', timeout: 15000 });
+    return { stdout, stderr: '', ok: true };
+  } catch (err: unknown) {
+    const e = err as { stdout?: string; stderr?: string };
+    return { stdout: e.stdout ?? '', stderr: e.stderr ?? '', ok: false };
+  }
 }
 
 export function runShell(cmd: string): { stdout: string; stderr: string; ok: boolean } {

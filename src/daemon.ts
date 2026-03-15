@@ -6,10 +6,12 @@ import { CronWatcher } from './watchers/cron.js';
 import { SessionWatcher } from './watchers/session.js';
 import { AuthWatcher } from './watchers/auth.js';
 import { CostWatcher } from './watchers/cost.js';
+import { BudgetWatcher } from './watchers/budget.js';
 import { ProcessHealer } from './healers/process.js';
 import { CronHealer } from './healers/cron.js';
 import { AuthHealer } from './healers/auth.js';
 import { SessionHealer } from './healers/session.js';
+import { BudgetHealer } from './healers/budget.js';
 import { HealResult } from './healers/base.js';
 import { TelegramAlerter } from './alerters/telegram.js';
 import { pruneOldEvents } from './store.js';
@@ -46,6 +48,7 @@ export class Daemon {
   private cronHealer: CronHealer;
   private authHealer: AuthHealer;
   private sessionHealer: SessionHealer;
+  private budgetHealer: BudgetHealer;
   private running = false;
   private tickInterval: NodeJS.Timeout | null = null;
   private plan: Plan = 'free';
@@ -61,9 +64,15 @@ export class Daemon {
     this.cronHealer = new CronHealer(config);
     this.authHealer = new AuthHealer(config);
     this.sessionHealer = new SessionHealer(config);
+    this.budgetHealer = new BudgetHealer(config);
     this.plan = loadLicense()?.plan ?? 'free';
     // Enforce tier-appropriate retention; override any manual config
     this.config.retentionDays = PLAN_RETENTION_DAYS[this.plan];
+    // Heal plan: ensure healers are active (dryRun=false); non-heal: force dryRun=true
+    const healPlanActive = this.plan === 'heal';
+    for (const key of Object.keys(this.config.healers) as Array<keyof typeof this.config.healers>) {
+      this.config.healers[key].dryRun = !healPlanActive;
+    }
     this.setupWatchers();
   }
 
@@ -106,6 +115,13 @@ export class Daemon {
       candidates.push({
         watcher: new CostWatcher(this.config),
         intervalMs: watchers.cost.interval * 1000,
+        lastRun: 0,
+      });
+    }
+    if (this.config.budget?.enabled) {
+      candidates.push({
+        watcher: new BudgetWatcher(this.config),
+        intervalMs: 300 * 1000,
         lastRun: 0,
       });
     }
@@ -297,6 +313,19 @@ export class Daemon {
       } else if (action === 'ignore') {
         console.log(`[${nowIso()}] [CronHealer] Ignored alert for ${cronName}`);
       }
+    } else if (resource === 'budget') {
+      if (action === 'kill_all') {
+        const { killed, failed } = await this.budgetHealer.killAllSessions();
+        console.log(`[${nowIso()}] [BudgetHealer] Emergency stop: ${killed} killed, ${failed} failed`);
+      } else if (action === 'increase') {
+        const newLimit = parseFloat(args[0] ?? '0');
+        if (newLimit > 0) {
+          this.config.budget.dailyLimitUsd = newLimit;
+          console.log(`[${nowIso()}] [BudgetHealer] Daily limit increased to $${newLimit}`);
+        }
+      } else if (action === 'ignore') {
+        console.log(`[${nowIso()}] [BudgetHealer] Budget alert ignored`);
+      }
     } else if (resource === 'session') {
       const agent = args[0] ?? 'unknown';
       const session = args[1] ?? 'unknown';
@@ -357,6 +386,15 @@ export class Daemon {
         const context = result.details ?? {};
         const healResult = await this.sessionHealer.heal(context as Record<string, unknown>);
         console.log(`[${nowIso()}] [SessionHealer] ${healResult.success ? 'SUCCESS' : 'FAILED'}: ${healResult.message}`);
+        return healResult;
+      }
+    }
+
+    if (watcher.name === 'BudgetWatcher' && result.event_type === 'budget_exceeded') {
+      if (autoFixAllowed) {
+        const context = result.details ?? {};
+        const healResult = await this.budgetHealer.heal(context as Record<string, unknown>);
+        console.log(`[${nowIso()}] [BudgetHealer] ${healResult.success ? 'SUCCESS' : 'FAILED'}: ${healResult.message}`);
         return healResult;
       }
     }

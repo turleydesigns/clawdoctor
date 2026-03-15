@@ -23,6 +23,11 @@ export interface AlertsConfig {
   telegram: TelegramConfig;
 }
 
+export interface BudgetConfig {
+  enabled: boolean;
+  dailyLimitUsd: number;
+}
+
 export interface ClawDoctorConfig {
   openclawPath: string;
   watchers: {
@@ -39,6 +44,7 @@ export interface ClawDoctorConfig {
     session: HealerConfig;
   };
   alerts: AlertsConfig;
+  budget: BudgetConfig;
   dryRun: boolean;
   retentionDays: number;
 }
@@ -205,6 +211,10 @@ export const DEFAULT_CONFIG: ClawDoctorConfig = {
       chatId: '',
     },
   },
+  budget: {
+    enabled: true,
+    dailyLimitUsd: 50,
+  },
   dryRun: false,
   retentionDays: 7,
 };
@@ -238,6 +248,7 @@ function mergeConfig(defaults: ClawDoctorConfig, overrides: Partial<ClawDoctorCo
         ...(overrides.alerts?.telegram ?? {}),
       },
     },
+    budget: { ...defaults.budget, ...(overrides.budget ?? {}) },
   };
 }
 
