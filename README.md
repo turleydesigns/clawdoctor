@@ -42,14 +42,14 @@ clawdoctor install-service  # Install as systemd user service
 | **CronWatcher** | `~/.openclaw/state/cron-*.json` for missed/failed crons | 60s |
 | **SessionWatcher** | `~/.openclaw/agents/*/sessions/*.jsonl` for errors, aborts, stuck sessions | 60s |
 | **AuthWatcher** | Gateway logs for 401/403/token expired patterns | 60s |
-| **CostWatcher** | Session token costs — flags if >3x rolling average | 5m |
+| **CostWatcher** | Session token costs - flags if >3x rolling average | 5m |
 
 ## What It Fixes
 
 | Healer | Action |
 |--------|--------|
 | **ProcessHealer** | Restarts gateway via `systemctl restart openclaw-gateway` or `openclaw gateway restart`, then verifies |
-| **CronHealer** | Logs the failure and includes the manual rerun command in the alert (Phase 0 — no auto-rerun) |
+| **CronHealer** | Logs the failure and includes the manual rerun command in the alert (Phase 0 - no auto-rerun) |
 
 ## Alerts
 
