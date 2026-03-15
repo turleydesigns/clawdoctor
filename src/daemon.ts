@@ -107,7 +107,7 @@ export class Daemon {
     console.log(`[${nowIso()}] Monitoring ${this.watchers.length} watcher(s)`);
 
     if (this.config.dryRun) {
-      console.log(`[${nowIso()}] DRY RUN mode — healers will not take action`);
+      console.log(`[${nowIso()}] DRY RUN mode - healers will not take action`);
     }
 
     // Run all watchers immediately on start

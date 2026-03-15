@@ -316,7 +316,7 @@ program
   .action(() => {
     const agentWatchBin = runShell('which clawdoctor').stdout.trim() || process.argv[1];
     const serviceContent = `[Unit]
-Description=ClawDoctor — OpenClaw monitor
+Description=ClawDoctor - OpenClaw monitor
 After=network.target
 
 [Service]
