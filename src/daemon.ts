@@ -1,4 +1,4 @@
-import { ClawDoctorConfig } from './config.js';
+import { ClawDoctorConfig, loadLicense, Plan } from './config.js';
 import { BaseWatcher, WatchResult } from './watchers/base.js';
 import { GatewayWatcher } from './watchers/gateway.js';
 import { CronWatcher } from './watchers/cron.js';
@@ -17,6 +17,16 @@ interface WatcherEntry {
   lastRun: number;
 }
 
+// Max monitors per plan
+const PLAN_MONITOR_LIMITS: Record<Plan, number> = {
+  free: 5,
+  diagnose: 20,
+  heal: Infinity,
+};
+
+// Plans that allow auto-fix
+const AUTO_FIX_PLANS: Plan[] = ['heal'];
+
 export class Daemon {
   private config: ClawDoctorConfig;
   private watchers: WatcherEntry[] = [];
@@ -25,52 +35,66 @@ export class Daemon {
   private cronHealer: CronHealer;
   private running = false;
   private tickInterval: NodeJS.Timeout | null = null;
+  private plan: Plan = 'free';
+  private licenseCheckInterval: NodeJS.Timeout | null = null;
 
   constructor(config: ClawDoctorConfig) {
     this.config = config;
     this.alerter = new TelegramAlerter(config);
     this.processHealer = new ProcessHealer(config);
     this.cronHealer = new CronHealer(config);
+    this.plan = loadLicense()?.plan ?? 'free';
     this.setupWatchers();
   }
 
   private setupWatchers(): void {
     const { watchers } = this.config;
+    const maxMonitors = PLAN_MONITOR_LIMITS[this.plan];
+
+    // Build candidate list; free plan gets gateway + first 4 crons/others
+    const candidates: WatcherEntry[] = [];
 
     if (watchers.gateway.enabled) {
-      this.watchers.push({
+      candidates.push({
         watcher: new GatewayWatcher(this.config),
         intervalMs: watchers.gateway.interval * 1000,
         lastRun: 0,
       });
     }
     if (watchers.cron.enabled) {
-      this.watchers.push({
+      candidates.push({
         watcher: new CronWatcher(this.config),
         intervalMs: watchers.cron.interval * 1000,
         lastRun: 0,
       });
     }
     if (watchers.session.enabled) {
-      this.watchers.push({
+      candidates.push({
         watcher: new SessionWatcher(this.config),
         intervalMs: watchers.session.interval * 1000,
         lastRun: 0,
       });
     }
     if (watchers.auth.enabled) {
-      this.watchers.push({
+      candidates.push({
         watcher: new AuthWatcher(this.config),
         intervalMs: watchers.auth.interval * 1000,
         lastRun: 0,
       });
     }
     if (watchers.cost.enabled) {
-      this.watchers.push({
+      candidates.push({
         watcher: new CostWatcher(this.config),
         intervalMs: watchers.cost.interval * 1000,
         lastRun: 0,
       });
+    }
+
+    // Apply monitor limit
+    this.watchers = candidates.slice(0, maxMonitors);
+
+    if (candidates.length > this.watchers.length) {
+      console.log(`[tier] Free plan: limited to ${maxMonitors} monitors. Upgrade at https://clawdoctor.dev/#pricing`);
     }
   }
 
@@ -79,6 +103,7 @@ export class Daemon {
     this.running = true;
 
     console.log(`[${nowIso()}] ClawDoctor daemon started`);
+    console.log(`[${nowIso()}] Plan: ${this.plan.toUpperCase()}`);
     console.log(`[${nowIso()}] Monitoring ${this.watchers.length} watcher(s)`);
 
     if (this.config.dryRun) {
@@ -98,6 +123,17 @@ export class Daemon {
         console.log(`[${nowIso()}] Pruned ${pruned} old event(s)`);
       }
     }, 24 * 3600 * 1000);
+
+    // Re-check license weekly
+    this.licenseCheckInterval = setInterval(() => {
+      const updatedPlan = loadLicense()?.plan ?? 'free';
+      if (updatedPlan !== this.plan) {
+        console.log(`[${nowIso()}] Plan changed: ${this.plan} -> ${updatedPlan}. Reloading watchers.`);
+        this.plan = updatedPlan;
+        this.watchers = [];
+        this.setupWatchers();
+      }
+    }, 7 * 24 * 3600 * 1000);
   }
 
   stop(): void {
@@ -106,6 +142,10 @@ export class Daemon {
     if (this.tickInterval) {
       clearInterval(this.tickInterval);
       this.tickInterval = null;
+    }
+    if (this.licenseCheckInterval) {
+      clearInterval(this.licenseCheckInterval);
+      this.licenseCheckInterval = null;
     }
     console.log(`[${nowIso()}] ClawDoctor daemon stopped`);
   }
@@ -155,12 +195,16 @@ export class Daemon {
     watcher: BaseWatcher,
     result: WatchResult
   ): Promise<import('./healers/base.js').HealResult | null> {
+    const autoFixAllowed = AUTO_FIX_PLANS.includes(this.plan);
+
     if (watcher.name === 'GatewayWatcher' && result.event_type === 'gateway_down') {
-      if (this.config.healers.processRestart.enabled) {
+      if (this.config.healers.processRestart.enabled && autoFixAllowed) {
         console.log(`[${nowIso()}] [ProcessHealer] Attempting to restart gateway...`);
         const healResult = await this.processHealer.heal({});
         console.log(`[${nowIso()}] [ProcessHealer] ${healResult.success ? 'SUCCESS' : 'FAILED'}: ${healResult.message}`);
         return healResult;
+      } else if (!autoFixAllowed) {
+        console.log(`[${nowIso()}] [ProcessHealer] Auto-fix requires Heal plan. Upgrade at https://clawdoctor.dev/#pricing`);
       }
     }
 

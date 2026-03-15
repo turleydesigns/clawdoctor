@@ -12,6 +12,12 @@ import {
   AGENTWATCH_DIR,
   PID_PATH,
   ClawDoctorConfig,
+  loadLicense,
+  saveLicense,
+  validateKeyRemote,
+  getActivePlan,
+  getPlanFeatures,
+  LicenseInfo,
 } from './config.js';
 import { Daemon } from './daemon.js';
 import { getRecentEvents, pruneOldEvents } from './store.js';
@@ -30,61 +36,94 @@ program
 program
   .command('init')
   .description('Interactive setup: detect OpenClaw, configure alerts')
-  .action(async () => {
-    console.log('\n🔍 ClawDoctor Setup\n');
+  .option('--openclaw-path <path>', 'Path to OpenClaw data directory')
+  .option('--telegram-token <token>', 'Telegram bot token')
+  .option('--telegram-chat <chatid>', 'Telegram chat ID')
+  .option('--auto-fix', 'Enable gateway auto-restart')
+  .option('--no-prompt', 'Skip all interactive prompts, use defaults')
+  .action(async (opts: {
+    openclawPath?: string;
+    telegramToken?: string;
+    telegramChat?: string;
+    autoFix?: boolean;
+    noPrompt?: boolean;
+  }) => {
+    const nonInteractive = !!opts.noPrompt;
+
+    if (!nonInteractive) {
+      console.log('\n🔍 ClawDoctor Setup\n');
+    }
 
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-    const ask = (question: string, defaultVal = ''): Promise<string> =>
-      new Promise(resolve => {
+    const ask = (question: string, defaultVal = ''): Promise<string> => {
+      if (nonInteractive) return Promise.resolve(defaultVal);
+      return new Promise(resolve => {
         const hint = defaultVal ? ` [${defaultVal}]` : '';
         rl.question(`${question}${hint}: `, answer => {
           resolve(answer.trim() || defaultVal);
         });
       });
+    };
 
     // Detect OpenClaw
-    const defaultOpenclawPath = path.join(os.homedir(), '.openclaw');
+    const defaultOpenclawPath = opts.openclawPath ?? path.join(os.homedir(), '.openclaw');
     const openclawExists = fs.existsSync(defaultOpenclawPath);
     const openclawhWhich = runShell('which openclaw');
 
-    if (openclawExists) {
-      console.log(`✅ Found OpenClaw at ${defaultOpenclawPath}`);
-    } else {
-      console.log(`⚠️  OpenClaw not found at ${defaultOpenclawPath}`);
+    if (!nonInteractive) {
+      if (openclawExists) {
+        console.log(`✅ Found OpenClaw at ${defaultOpenclawPath}`);
+      } else {
+        console.log(`⚠️  OpenClaw not found at ${defaultOpenclawPath}`);
+      }
+
+      if (openclawhWhich.ok) {
+        console.log(`✅ openclaw binary found at ${openclawhWhich.stdout.trim()}`);
+      } else {
+        console.log(`⚠️  openclaw binary not found in PATH`);
+      }
+
+      console.log('');
     }
 
-    if (openclawhWhich.ok) {
-      console.log(`✅ openclaw binary found at ${openclawhWhich.stdout.trim()}`);
-    } else {
-      console.log(`⚠️  openclaw binary not found in PATH`);
-    }
-
-    console.log('');
-
-    const openclawPath = await ask('OpenClaw data path', defaultOpenclawPath);
+    const openclawPath = opts.openclawPath ?? await ask('OpenClaw data path', defaultOpenclawPath);
 
     // Telegram setup
-    console.log('\n📱 Telegram Alerts (optional — press Enter to skip)\n');
-    const botToken = await ask('Telegram bot token (leave blank to skip)');
-    let chatId = '';
-    if (botToken) {
-      chatId = await ask('Telegram chat ID');
+    let botToken = opts.telegramToken ?? '';
+    let chatId = opts.telegramChat ?? '';
+    if (!nonInteractive && !opts.telegramToken) {
+      console.log('\n📱 Telegram Alerts (optional, press Enter to skip)\n');
+      botToken = await ask('Telegram bot token (leave blank to skip)');
+      if (botToken) {
+        chatId = await ask('Telegram chat ID');
+      }
     }
 
-    // Watcher preferences
-    console.log('\n⚙️  Watcher Configuration\n');
-    const enableGateway = (await ask('Monitor gateway process?', 'yes')).toLowerCase() !== 'no';
-    const enableCron = (await ask('Monitor crons?', 'yes')).toLowerCase() !== 'no';
-    const enableSession = (await ask('Monitor sessions?', 'yes')).toLowerCase() !== 'no';
-    const enableAuth = (await ask('Monitor auth failures?', 'yes')).toLowerCase() !== 'no';
-    const enableCost = (await ask('Monitor cost anomalies?', 'yes')).toLowerCase() !== 'no';
+    // Watcher preferences (all enabled by default in non-interactive mode)
+    let enableGateway = true;
+    let enableCron = true;
+    let enableSession = true;
+    let enableAuth = true;
+    let enableCost = true;
+
+    if (!nonInteractive) {
+      console.log('\n⚙️  Watcher Configuration\n');
+      enableGateway = (await ask('Monitor gateway process?', 'yes')).toLowerCase() !== 'no';
+      enableCron = (await ask('Monitor crons?', 'yes')).toLowerCase() !== 'no';
+      enableSession = (await ask('Monitor sessions?', 'yes')).toLowerCase() !== 'no';
+      enableAuth = (await ask('Monitor auth failures?', 'yes')).toLowerCase() !== 'no';
+      enableCost = (await ask('Monitor cost anomalies?', 'yes')).toLowerCase() !== 'no';
+    }
 
     // Healer preferences
-    console.log('\n🔧 Auto-Fix Configuration\n');
-    const enableProcessRestart = (await ask('Auto-restart gateway on failure?', 'yes')).toLowerCase() !== 'no';
+    let enableProcessRestart = opts.autoFix ?? false;
+    let dryRun = false;
 
-    // Dry run?
-    const dryRun = (await ask('Enable dry-run mode (no actual healing)?', 'no')).toLowerCase() === 'yes';
+    if (!nonInteractive) {
+      console.log('\n🔧 Auto-Fix Configuration\n');
+      enableProcessRestart = (await ask('Auto-restart gateway on failure?', 'yes')).toLowerCase() !== 'no';
+      dryRun = (await ask('Enable dry-run mode (no actual healing)?', 'no')).toLowerCase() === 'yes';
+    }
 
     rl.close();
 
@@ -116,10 +155,11 @@ program
     saveConfig(config);
     console.log(`\n✅ Config saved to ${AGENTWATCH_DIR}/config.json`);
 
-    // Offer systemd install
-    console.log('\n💡 To start monitoring now, run: clawdoctor start');
-    console.log('💡 To install as a systemd service, run: clawdoctor install-service');
-    console.log('');
+    if (!nonInteractive) {
+      console.log('\n💡 To start monitoring now, run: clawdoctor start');
+      console.log('💡 To install as a systemd service, run: clawdoctor install-service');
+      console.log('');
+    }
   });
 
 // ── start ─────────────────────────────────────────────────────────────────────
@@ -301,6 +341,88 @@ WantedBy=default.target
     console.log('  systemctl --user daemon-reload');
     console.log('  systemctl --user enable clawdoctor');
     console.log('  systemctl --user start clawdoctor');
+    console.log('');
+  });
+
+// ── activate ──────────────────────────────────────────────────────────────────
+program
+  .command('activate [key]')
+  .description('Activate a license key')
+  .option('--key <key>', 'License key (alternative to positional argument)')
+  .action(async (positionalKey?: string, opts?: { key?: string }) => {
+    const key = positionalKey ?? opts?.key ?? process.env.CLAWDOCTOR_KEY;
+
+    if (!key) {
+      console.error('Usage: clawdoctor activate <key>');
+      console.error('       clawdoctor activate --key <key>');
+      console.error('       CLAWDOCTOR_KEY=<key> clawdoctor activate');
+      process.exit(1);
+    }
+
+    console.log('Validating license key...');
+    const result = await validateKeyRemote(key);
+
+    if (!result.valid) {
+      console.error('License key is invalid or expired.');
+      process.exit(1);
+    }
+
+    const info: LicenseInfo = {
+      key,
+      plan: result.plan ?? 'diagnose',
+      features: result.features ?? [],
+      email: result.email,
+      createdAt: result.createdAt,
+      validatedAt: new Date().toISOString(),
+    };
+
+    saveLicense(info);
+
+    console.log(`\n✅ License activated: ${info.plan.toUpperCase()} plan`);
+    if (info.email) console.log(`   Account: ${info.email}`);
+    console.log('\nUnlocked features:');
+    for (const f of info.features) {
+      console.log(`  - ${f}`);
+    }
+    console.log('');
+  });
+
+// ── plan ──────────────────────────────────────────────────────────────────────
+program
+  .command('plan')
+  .description('Show current plan, features, and license status')
+  .action(() => {
+    const license = loadLicense();
+    const plan = license?.plan ?? 'free';
+    const features = license ? license.features : getPlanFeatures('free');
+
+    console.log('\nClawDoctor Plan\n───────────────');
+    console.log(`Plan:       ${plan.toUpperCase()}`);
+
+    if (license) {
+      console.log(`Key:        ${license.key.slice(0, 8)}...${license.key.slice(-4)}`);
+      if (license.email) console.log(`Account:    ${license.email}`);
+      console.log(`Validated:  ${license.validatedAt.slice(0, 10)}`);
+      console.log(`Status:     active`);
+    } else {
+      const envKey = process.env.CLAWDOCTOR_KEY;
+      if (envKey) {
+        console.log(`Key:        via CLAWDOCTOR_KEY env var`);
+        console.log(`Status:     not locally validated`);
+      } else {
+        console.log(`Key:        none`);
+        console.log(`Status:     free tier`);
+      }
+    }
+
+    console.log('\nFeatures:');
+    for (const f of features) {
+      console.log(`  - ${f}`);
+    }
+
+    if (plan === 'free') {
+      console.log('\n💡 Upgrade at https://clawdoctor.dev/#pricing');
+    }
     console.log('');
   });
 
