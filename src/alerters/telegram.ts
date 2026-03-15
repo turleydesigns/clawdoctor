@@ -4,6 +4,7 @@ import { HealResult } from '../healers/base.js';
 import { nowUtcDisplay, hostname, nowIso } from '../utils.js';
 
 const RATE_LIMIT_MS = 5 * 60 * 1000; // 5 minutes per monitor
+const DEDUP_MS = 60 * 60 * 1000; // 1 hour: suppress identical alerts (same watcher + event_type + message)
 
 const TELEGRAM_API = 'https://api.telegram.org';
 
@@ -26,6 +27,7 @@ interface PendingCallback {
 export class TelegramAlerter {
   private config: ClawDoctorConfig;
   private lastAlertTime: Map<string, number> = new Map();
+  private alertDedup: Map<string, number> = new Map(); // key: watcher+event_type+message → last sent time
   private pendingCallbacks: Map<string, PendingCallback> = new Map();
   private lastUpdateId = 0;
 
@@ -43,7 +45,25 @@ export class TelegramAlerter {
   }
 
   shouldAlert(result: WatchResult): boolean {
-    return result.severity === 'error' || result.severity === 'critical' || result.severity === 'warning';
+    if (result.severity !== 'error' && result.severity !== 'critical' && result.severity !== 'warning') {
+      return false;
+    }
+    return true;
+  }
+
+  private dedupKey(watcher: string, result: WatchResult): string {
+    return `${watcher}:${result.event_type}:${result.message}`;
+  }
+
+  private isDuplicate(watcher: string, result: WatchResult): boolean {
+    const key = this.dedupKey(watcher, result);
+    const lastSent = this.alertDedup.get(key) ?? 0;
+    return Date.now() - lastSent < DEDUP_MS;
+  }
+
+  private markDedup(watcher: string, result: WatchResult): void {
+    const key = this.dedupKey(watcher, result);
+    this.alertDedup.set(key, Date.now());
   }
 
   async sendAlert(payload: AlertPayload): Promise<boolean> {
@@ -54,6 +74,10 @@ export class TelegramAlerter {
     }
 
     if (this.isRateLimited(payload.watcher)) {
+      return false;
+    }
+
+    if (this.isDuplicate(payload.watcher, payload.result)) {
       return false;
     }
 
@@ -73,6 +97,7 @@ export class TelegramAlerter {
 
       if (response.ok) {
         this.markAlerted(payload.watcher);
+        this.markDedup(payload.watcher, payload.result);
         return true;
       } else {
         const body = await response.text();

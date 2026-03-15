@@ -19,6 +19,7 @@ interface CronJob {
   enabled: boolean;
   schedule: { kind: string; expr?: string };
   state: CronJobState;
+  delivery?: { mode?: string };
   agentId?: string;
 }
 
@@ -109,8 +110,9 @@ export class CronWatcher extends BaseWatcher {
         }
       }
 
-      // Check delivery status
-      if (state.lastDeliveryStatus && state.lastDeliveryStatus !== 'delivered') {
+      // Check delivery status (skip if delivery mode is "none" — not-delivered is expected)
+      const deliveryMode = job.delivery?.mode ?? 'announce';
+      if (deliveryMode !== 'none' && state.lastDeliveryStatus && state.lastDeliveryStatus !== 'delivered') {
         results.push(
           this.warn(
             `Cron '${name}' last delivery failed: ${state.lastDeliveryStatus}`,
