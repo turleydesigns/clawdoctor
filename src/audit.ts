@@ -19,7 +19,7 @@ export interface AuditEntry {
 
 export function appendAudit(entry: AuditEntry): void {
   fs.mkdirSync(path.dirname(AUDIT_PATH), { recursive: true });
-  fs.appendFileSync(AUDIT_PATH, JSON.stringify(entry) + '\n', 'utf-8');
+  fs.appendFileSync(AUDIT_PATH, JSON.stringify(entry) + '\n', { encoding: 'utf-8', mode: 0o600 });
 }
 
 export function getRecentAudit(limit = 50): AuditEntry[] {

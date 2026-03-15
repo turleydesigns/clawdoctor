@@ -1,3 +1,4 @@
+import { execFileSync } from 'child_process';
 import { ClawDoctorConfig, loadLicense, Plan } from './config.js';
 import { BaseWatcher, WatchResult } from './watchers/base.js';
 import { GatewayWatcher } from './watchers/gateway.js';
@@ -12,7 +13,7 @@ import { SessionHealer } from './healers/session.js';
 import { HealResult } from './healers/base.js';
 import { TelegramAlerter } from './alerters/telegram.js';
 import { pruneOldEvents } from './store.js';
-import { nowIso, runShell } from './utils.js';
+import { nowIso } from './utils.js';
 
 interface WatcherEntry {
   watcher: BaseWatcher;
@@ -43,6 +44,8 @@ export class Daemon {
   private plan: Plan = 'free';
   private licenseCheckInterval: NodeJS.Timeout | null = null;
   private callbackPollInterval: NodeJS.Timeout | null = null;
+  private callbackRateLimit = new Map<string, number>();
+  private readonly CALLBACK_DEBOUNCE_MS = 10_000;
 
   constructor(config: ClawDoctorConfig) {
     this.config = config;
@@ -236,6 +239,14 @@ export class Daemon {
   }
 
   private async handleCallbackAction(callbackData: string): Promise<void> {
+    const now = Date.now();
+    const lastRun = this.callbackRateLimit.get(callbackData) ?? 0;
+    if (now - lastRun < this.CALLBACK_DEBOUNCE_MS) {
+      console.log(`[${nowIso()}] [Daemon] Callback rate-limited (10s debounce): ${callbackData}`);
+      return;
+    }
+    this.callbackRateLimit.set(callbackData, now);
+
     console.log(`[${nowIso()}] [Daemon] Handling callback: ${callbackData}`);
     const parts = callbackData.split(':');
     const [resource, action, ...args] = parts;
@@ -243,11 +254,19 @@ export class Daemon {
     if (resource === 'cron') {
       const cronName = args[0] ?? 'unknown';
       if (action === 'retry') {
-        const result = runShell(`openclaw cron run ${cronName}`);
-        console.log(`[${nowIso()}] [CronHealer] Retry ${cronName}: ${result.ok ? 'success' : 'failed'}`);
+        try {
+          execFileSync('openclaw', ['cron', 'run', cronName]);
+          console.log(`[${nowIso()}] [CronHealer] Retry ${cronName}: success`);
+        } catch {
+          console.log(`[${nowIso()}] [CronHealer] Retry ${cronName}: failed`);
+        }
       } else if (action === 'disable') {
-        const result = runShell(`openclaw cron disable ${cronName}`);
-        console.log(`[${nowIso()}] [CronHealer] Disable ${cronName}: ${result.ok ? 'success' : 'failed'}`);
+        try {
+          execFileSync('openclaw', ['cron', 'disable', cronName]);
+          console.log(`[${nowIso()}] [CronHealer] Disable ${cronName}: success`);
+        } catch {
+          console.log(`[${nowIso()}] [CronHealer] Disable ${cronName}: failed`);
+        }
       } else if (action === 'ignore') {
         console.log(`[${nowIso()}] [CronHealer] Ignored alert for ${cronName}`);
       }
@@ -255,8 +274,12 @@ export class Daemon {
       const agent = args[0] ?? 'unknown';
       const session = args[1] ?? 'unknown';
       if (action === 'kill') {
-        const result = runShell(`openclaw session kill ${agent} ${session}`);
-        console.log(`[${nowIso()}] [SessionHealer] Kill ${agent}/${session}: ${result.ok ? 'success' : 'failed'}`);
+        try {
+          execFileSync('openclaw', ['session', 'kill', agent, session]);
+          console.log(`[${nowIso()}] [SessionHealer] Kill ${agent}/${session}: success`);
+        } catch {
+          console.log(`[${nowIso()}] [SessionHealer] Kill ${agent}/${session}: failed`);
+        }
       } else if (action === 'ignore') {
         console.log(`[${nowIso()}] [SessionHealer] Ignored alert for ${agent}/${session}`);
       }

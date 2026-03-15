@@ -39,13 +39,11 @@ program
   .command('init')
   .description('Interactive setup: detect OpenClaw, configure alerts')
   .option('--openclaw-path <path>', 'Path to OpenClaw data directory')
-  .option('--telegram-token <token>', 'Telegram bot token')
   .option('--telegram-chat <chatid>', 'Telegram chat ID')
   .option('--auto-fix', 'Enable gateway auto-restart')
   .option('--no-prompt', 'Skip all interactive prompts, use defaults')
   .action(async (opts: {
     openclawPath?: string;
-    telegramToken?: string;
     telegramChat?: string;
     autoFix?: boolean;
     noPrompt?: boolean;
@@ -91,9 +89,9 @@ program
     const openclawPath = opts.openclawPath ?? await ask('OpenClaw data path', defaultOpenclawPath);
 
     // Telegram setup
-    let botToken = opts.telegramToken ?? '';
+    let botToken = '';
     let chatId = opts.telegramChat ?? '';
-    if (!nonInteractive && !opts.telegramToken) {
+    if (!nonInteractive) {
       console.log('\n📱 Telegram Alerts (optional, press Enter to skip)\n');
       botToken = await ask('Telegram bot token (leave blank to skip)');
       if (botToken) {
@@ -184,7 +182,7 @@ program
 
     // Write PID file
     fs.mkdirSync(AGENTWATCH_DIR, { recursive: true });
-    fs.writeFileSync(PID_PATH, String(process.pid), 'utf-8');
+    fs.writeFileSync(PID_PATH, String(process.pid), { encoding: 'utf-8', mode: 0o600 });
 
     const daemon = new Daemon(config);
 
@@ -330,6 +328,10 @@ Restart=on-failure
 RestartSec=10
 StandardOutput=journal
 StandardError=journal
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/home/%u/.clawdoctor
 
 [Install]
 WantedBy=default.target

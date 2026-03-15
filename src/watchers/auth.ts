@@ -1,4 +1,4 @@
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import { BaseWatcher, WatchResult } from './base.js';
 
 const AUTH_PATTERNS = [
@@ -39,8 +39,9 @@ export class AuthWatcher extends BaseWatcher {
 
   private readJournalLogs(): string[] | null {
     try {
-      const output = execSync(
-        'journalctl -u openclaw-gateway --since "5 minutes ago" --no-pager -q 2>/dev/null',
+      const output = execFileSync(
+        'journalctl',
+        ['-u', 'openclaw-gateway', '--since', '5 minutes ago', '--no-pager', '-q'],
         { encoding: 'utf-8', timeout: 5000 }
       );
       return output.split('\n').slice(-MAX_LOG_LINES);
@@ -57,7 +58,7 @@ export class AuthWatcher extends BaseWatcher {
 
     for (const logPath of logPaths) {
       try {
-        const output = execSync(`tail -n ${MAX_LOG_LINES} "${logPath}" 2>/dev/null`, {
+        const output = execFileSync('tail', ['-n', String(MAX_LOG_LINES), logPath], {
           encoding: 'utf-8',
           timeout: 3000,
         });

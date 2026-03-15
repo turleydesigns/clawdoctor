@@ -57,11 +57,12 @@ describe('Snapshots', () => {
     assert.ok(result.message.includes('not found'));
   });
 
-  it('executeRollback runs rollback command', async () => {
+  it('executeRollback rejects non-allowlisted commands', async () => {
     const { createSnapshot, executeRollback } = await import('../snapshots.js');
     const id = createSnapshot('echo-test', 'test', {}, 'echo hello-rollback');
     const result = executeRollback(id);
-    assert.equal(result.success, true, `Expected success, got: ${result.message}`);
+    assert.equal(result.success, false, 'Non-allowlisted command should be rejected');
+    assert.ok(result.message.includes('allowlist'), `Expected allowlist rejection, got: ${result.message}`);
   });
 });
 
