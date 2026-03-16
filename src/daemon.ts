@@ -263,7 +263,7 @@ export class Daemon {
 
   private async sendApprovalRequest(watcherName: string, healResult: HealResult): Promise<void> {
     const options = healResult.approvalOptions ?? [];
-    const { text, buttons } = this.alerter.formatApprovalMessage(
+    const { text, buttons, suggestions } = this.alerter.formatApprovalMessage(
       watcherName,
       healResult.message,
       options
@@ -278,7 +278,7 @@ export class Daemon {
       };
     }
 
-    await this.alerter.sendWithButtons(text, buttons, handlers);
+    await this.alerter.sendWithButtons(text, buttons, handlers, suggestions);
   }
 
   private async handleCallbackAction(callbackData: string): Promise<void> {

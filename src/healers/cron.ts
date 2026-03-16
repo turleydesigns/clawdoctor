@@ -79,7 +79,7 @@ export class CronHealer extends BaseHealer {
 
       if (now - lastRetry < CronHealer.RETRY_COOLDOWN_MS) {
         // Still in cooldown, just log
-        this.writeAudit('cron-log', cronName, 'green', 'cooldown');
+        this.writeAudit('cron-log', cronName, 'green', 'pending');
         return {
           success: true,
           action: `retry cooldown for '${cronName}'`,

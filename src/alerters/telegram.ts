@@ -110,15 +110,35 @@ export class TelegramAlerter {
     }
   }
 
+  /**
+   * Returns true if inline button mode is available (callbackBotToken is configured).
+   * When false, sendWithButtons falls back to a plain text message with CLI suggestions.
+   */
+  hasCallbackSupport(): boolean {
+    return !!this.config.alerts.telegram.callbackBotToken;
+  }
+
   async sendWithButtons(
     text: string,
     buttons: InlineButton[][],
-    handlers: Record<string, () => Promise<void>>
+    handlers: Record<string, () => Promise<void>>,
+    suggestions?: string[]
   ): Promise<boolean> {
     const { telegram } = this.config.alerts;
 
     if (!telegram.enabled || !telegram.botToken || !telegram.chatId) {
       return false;
+    }
+
+    // If no callbackBotToken, fall back to plain text with CLI suggestions.
+    // This avoids polling conflicts when the same bot token is shared with another
+    // process (e.g. OpenClaw), which would silently swallow callback_query updates.
+    if (!telegram.callbackBotToken) {
+      const suggestionLines = suggestions?.length
+        ? suggestions
+        : buttons.flat().map(b => `→ ${b.text}: <code>clawdoctor ${b.callback_data.replace(/:/g, ' ')}</code>`);
+      const fallbackText = `${text}\n\n${suggestionLines.join('\n')}`;
+      return this.sendPlainMessage(fallbackText);
     }
 
     try {
@@ -154,10 +174,36 @@ export class TelegramAlerter {
     }
   }
 
+  private async sendPlainMessage(text: string): Promise<boolean> {
+    const { telegram } = this.config.alerts;
+    try {
+      const url = `${TELEGRAM_API}/bot${telegram.botToken}/sendMessage`;
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: telegram.chatId,
+          text,
+          parse_mode: 'HTML',
+        }),
+      });
+      if (!response.ok) {
+        const body = await response.text();
+        console.error(`[TelegramAlerter] Failed to send plain message: ${response.status} ${body}`);
+        return false;
+      }
+      return true;
+    } catch (err) {
+      console.error(`[TelegramAlerter] Error sending plain message:`, err);
+      return false;
+    }
+  }
+
   async pollCallbacks(): Promise<void> {
     const { telegram } = this.config.alerts;
 
-    if (!telegram.enabled || !telegram.botToken || !telegram.chatId) {
+    // Only poll if a dedicated callback bot token is configured
+    if (!telegram.enabled || !telegram.callbackBotToken || !telegram.chatId) {
       return;
     }
 
@@ -174,7 +220,7 @@ export class TelegramAlerter {
     }
 
     try {
-      const url = `${TELEGRAM_API}/bot${telegram.botToken}/getUpdates?offset=${this.lastUpdateId + 1}&timeout=1&allowed_updates=["callback_query"]`;
+      const url = `${TELEGRAM_API}/bot${telegram.callbackBotToken}/getUpdates?offset=${this.lastUpdateId + 1}&timeout=1&allowed_updates=["callback_query"]`;
       const response = await fetch(url);
       if (!response.ok) return;
 
@@ -202,7 +248,7 @@ export class TelegramAlerter {
 
         // Answer the callback query to remove loading state
         try {
-          await fetch(`${TELEGRAM_API}/bot${telegram.botToken}/answerCallbackQuery`, {
+          await fetch(`${TELEGRAM_API}/bot${telegram.callbackBotToken}/answerCallbackQuery`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ callback_query_id: cbq.id, text: 'Processing...' }),
@@ -247,7 +293,7 @@ export class TelegramAlerter {
     watcher: string,
     message: string,
     options: Array<{ text: string; callbackData: string }>
-  ): { text: string; buttons: InlineButton[][] } {
+  ): { text: string; buttons: InlineButton[][]; suggestions: string[] } {
     const lines = [
       `🟡 <b>ClawDoctor: Action Required</b>`,
       `Monitor: ${watcher}`,
@@ -261,7 +307,10 @@ export class TelegramAlerter {
       options.map(o => ({ text: o.text, callback_data: o.callbackData })),
     ];
 
-    return { text: lines.join('\n'), buttons };
+    // Plain text fallback suggestions shown when callbackBotToken is not configured
+    const suggestions = options.map(o => `→ ${o.text}: <code>clawdoctor ${o.callbackData.replace(/:/g, ' ')}</code>`);
+
+    return { text: lines.join('\n'), buttons, suggestions };
   }
 
   async sendRecovery(watcherName: string, message: string): Promise<boolean> {

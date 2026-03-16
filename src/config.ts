@@ -17,6 +17,14 @@ export interface TelegramConfig {
   enabled: boolean;
   botToken: string;
   chatId: string;
+  /**
+   * Optional: a separate bot token dedicated to receiving callback_query updates
+   * (inline button presses). If set, ClawDoctor will poll this bot for callbacks
+   * and show inline buttons in alerts. If omitted, alerts fall back to plain text
+   * suggestions (e.g. "Run: clawdoctor retry metrics-collector") to avoid
+   * conflicts with other processes polling the same bot token (e.g. OpenClaw).
+   */
+  callbackBotToken?: string;
 }
 
 export interface AlertsConfig {
