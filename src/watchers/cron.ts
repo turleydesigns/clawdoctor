@@ -62,9 +62,16 @@ export class CronWatcher extends BaseWatcher {
     let errored = 0;
     let overdue = 0;
 
+    const ignoreCrons = new Set(this.config.ignoreCrons ?? []);
+
     for (const job of enabledJobs) {
       const state = job.state ?? {};
       const name = job.name ?? job.id;
+
+      // Skip crons explicitly listed in ignoreCrons config
+      if (ignoreCrons.has(name) || ignoreCrons.has(job.id)) {
+        continue;
+      }
 
       // Check consecutive errors
       if ((state.consecutiveErrors ?? 0) >= 3) {

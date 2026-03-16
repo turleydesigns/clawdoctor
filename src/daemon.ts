@@ -14,7 +14,7 @@ import { SessionHealer } from './healers/session.js';
 import { BudgetHealer } from './healers/budget.js';
 import { HealResult } from './healers/base.js';
 import { TelegramAlerter } from './alerters/telegram.js';
-import { pruneOldEvents } from './store.js';
+import { pruneOldEvents, getDedupTimestamp, setDedupTimestamp, pruneDedup } from './store.js';
 import { nowIso } from './utils.js';
 
 interface WatcherEntry {
@@ -261,17 +261,17 @@ export class Daemon {
     }
   }
 
-  private approvalDedup: Map<string, number> = new Map();
   private readonly APPROVAL_DEDUP_MS = 60 * 60 * 1000; // 1 hour
 
   private async sendApprovalRequest(watcherName: string, healResult: HealResult): Promise<void> {
-    // Deduplicate: only send one approval request per watcher per hour
+    // Deduplicate: only send one approval request per watcher per hour.
+    // State is persisted to SQLite so restarts don't reset the window.
     const dedupKey = `approval:${watcherName}:${healResult.action}`;
-    const lastSent = this.approvalDedup.get(dedupKey) ?? 0;
+    const lastSent = getDedupTimestamp(dedupKey);
     if (Date.now() - lastSent < this.APPROVAL_DEDUP_MS) {
       return;
     }
-    this.approvalDedup.set(dedupKey, Date.now());
+    setDedupTimestamp(dedupKey, Date.now());
 
     const options = healResult.approvalOptions ?? [];
     const { text, buttons, suggestions } = this.alerter.formatApprovalMessage(

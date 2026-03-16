@@ -55,6 +55,8 @@ export interface ClawDoctorConfig {
   budget: BudgetConfig;
   dryRun: boolean;
   retentionDays: number;
+  /** Cron job names to skip entirely — no alerts, no healing */
+  ignoreCrons?: string[];
 }
 
 export const AGENTWATCH_DIR = path.join(os.homedir(), '.clawdoctor');

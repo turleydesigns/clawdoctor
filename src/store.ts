@@ -49,7 +49,32 @@ function initSchema(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_events_watcher ON events(watcher);
     CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
     CREATE INDEX IF NOT EXISTS idx_events_severity ON events(severity);
+
+    CREATE TABLE IF NOT EXISTS alert_dedup (
+      dedup_key TEXT PRIMARY KEY,
+      last_sent_ms INTEGER NOT NULL
+    );
   `);
+}
+
+/** Read a dedup timestamp from persistent storage. Returns 0 if not found. */
+export function getDedupTimestamp(key: string): number {
+  const db = getDb();
+  const row = db.prepare('SELECT last_sent_ms FROM alert_dedup WHERE dedup_key = ?').get(key) as { last_sent_ms: number } | undefined;
+  return row?.last_sent_ms ?? 0;
+}
+
+/** Write/update a dedup timestamp in persistent storage. */
+export function setDedupTimestamp(key: string, tsMs: number): void {
+  const db = getDb();
+  db.prepare('INSERT OR REPLACE INTO alert_dedup (dedup_key, last_sent_ms) VALUES (?, ?)').run(key, tsMs);
+}
+
+/** Prune dedup entries older than maxAgeMs to keep the table small. */
+export function pruneDedup(maxAgeMs: number): void {
+  const db = getDb();
+  const cutoff = Date.now() - maxAgeMs;
+  db.prepare('DELETE FROM alert_dedup WHERE last_sent_ms < ?').run(cutoff);
 }
 
 export function insertEvent(event: Omit<Event, 'id' | 'created_at'>): number {

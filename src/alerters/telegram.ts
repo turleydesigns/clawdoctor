@@ -1,6 +1,7 @@
 import { ClawDoctorConfig } from '../config.js';
 import { WatchResult } from '../watchers/base.js';
 import { HealResult } from '../healers/base.js';
+import { getDedupTimestamp, setDedupTimestamp } from '../store.js';
 import { nowUtcDisplay, hostname, nowIso } from '../utils.js';
 
 const RATE_LIMIT_MS = 5 * 60 * 1000; // 5 minutes per monitor
@@ -59,14 +60,14 @@ export class TelegramAlerter {
   }
 
   private isDuplicate(watcher: string, result: WatchResult): boolean {
-    const key = this.dedupKey(watcher, result);
-    const lastSent = this.alertDedup.get(key) ?? 0;
+    const key = `alert:${this.dedupKey(watcher, result)}`;
+    const lastSent = getDedupTimestamp(key);
     return Date.now() - lastSent < DEDUP_MS;
   }
 
   private markDedup(watcher: string, result: WatchResult): void {
-    const key = this.dedupKey(watcher, result);
-    this.alertDedup.set(key, Date.now());
+    const key = `alert:${this.dedupKey(watcher, result)}`;
+    setDedupTimestamp(key, Date.now());
   }
 
   async sendAlert(payload: AlertPayload): Promise<boolean> {
