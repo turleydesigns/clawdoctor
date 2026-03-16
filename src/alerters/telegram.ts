@@ -52,7 +52,10 @@ export class TelegramAlerter {
   }
 
   private dedupKey(watcher: string, result: WatchResult): string {
-    return `${watcher}:${result.event_type}:${result.message}`;
+    // Exclude message from key — messages often include incrementing counts
+    // ("failed 7 times", "failed 8 times") which would defeat dedup entirely.
+    // Watcher + event_type is enough to identify a unique problem.
+    return `${watcher}:${result.event_type}`;
   }
 
   private isDuplicate(watcher: string, result: WatchResult): boolean {
