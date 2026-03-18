@@ -24,6 +24,7 @@ import { getRecentEvents, pruneOldEvents } from './store.js';
 import { nowIso, runShell } from './utils.js';
 import { listSnapshots, executeRollback } from './snapshots.js';
 import { getRecentAudit } from './audit.js';
+import { sendOnboardingEmail, fireScheduledEmails } from './email.js';
 
 const pkg = { version: '0.3.1' };
 
@@ -125,6 +126,13 @@ program
       dryRun = (await ask('Enable dry-run mode (no actual healing)?', 'no')).toLowerCase() === 'yes';
     }
 
+    // Email onboarding (optional)
+    let onboardingEmail = '';
+    if (!nonInteractive) {
+      console.log('\n📧 Setup Guide (optional)\n');
+      onboardingEmail = await ask('Enter email for 3-day setup guide? (leave blank to skip)', '');
+    }
+
     rl.close();
 
     const config: ClawDoctorConfig = {
@@ -161,6 +169,11 @@ program
       console.log('\n💡 To start monitoring now, run: clawdoctor start');
       console.log('💡 To install as a systemd service, run: clawdoctor install-service');
       console.log('');
+    }
+
+    // Fire Day 0 onboarding email and schedule Days 3+7
+    if (onboardingEmail) {
+      await sendOnboardingEmail(onboardingEmail);
     }
   });
 
@@ -266,6 +279,9 @@ program
       }
     }
     console.log('');
+
+    // Fire any overdue onboarding emails (Days 3 and 7)
+    await fireScheduledEmails();
   });
 
 // ── log ───────────────────────────────────────────────────────────────────────

@@ -124,6 +124,37 @@ systemctl --user enable clawdoctor
 systemctl --user start clawdoctor
 ```
 
+## Email Onboarding (Optional)
+
+During `clawdoctor init` you'll be prompted for an optional email address:
+
+```
+📧 Setup Guide (optional)
+
+Enter email for 3-day setup guide? (leave blank to skip):
+```
+
+If provided, ClawDoctor sends a 3-email onboarding sequence via [Resend](https://resend.com):
+
+| Email | Timing | Content |
+|-------|--------|---------|
+| Day 0 | Immediately | Setup guide, key commands, what's monitored |
+| Day 3 | 3 days after init | Tips: event log review, cron health check, tuning |
+| Day 7 | 7 days after init | Heal tier overview and upgrade path |
+
+Day 3 and Day 7 emails are tracked in `~/.clawdoctor/email-schedule.json` and dispatched the
+next time `clawdoctor status` runs after they become due.
+
+### RESEND_API_KEY
+
+Set this environment variable to enable email delivery:
+
+```bash
+export RESEND_API_KEY=re_your_key_here
+```
+
+Without it, emails are silently skipped. The key is **never** hardcoded — always read from env.
+
 ## Non-Interactive Setup
 
 ```bash
