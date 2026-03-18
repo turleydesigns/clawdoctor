@@ -16,7 +16,7 @@ import os from 'os';
 
 export const EMAIL_SCHEDULE_PATH = path.join(os.homedir(), '.clawdoctor', 'email-schedule.json');
 
-const FROM_ADDRESS = 'ClawDoctor <noreply@clawdoctor.dev>';
+const FROM_ADDRESS = 'ClawDoctor <noreply@relayplane.com>';
 const RESEND_API_HOST = 'api.resend.com';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
