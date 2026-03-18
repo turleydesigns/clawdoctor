@@ -66,8 +66,8 @@ export class CronWatcher extends BaseWatcher {
       const state = job.state ?? {};
       const name = job.name ?? job.id;
 
-      // Check consecutive errors
-      if ((state.consecutiveErrors ?? 0) >= 3) {
+      // Check consecutive errors — but skip if last run was ok (cron recovered)
+      if ((state.consecutiveErrors ?? 0) >= 3 && state.lastRunStatus !== 'ok') {
         results.push(
           this.error(
             `Cron '${name}' has ${state.consecutiveErrors} consecutive errors`,
@@ -79,7 +79,7 @@ export class CronWatcher extends BaseWatcher {
         continue;
       }
 
-      // Check last run status
+      // Check last run status — explicit error states only, skip if ok or absent
       if (state.lastRunStatus && state.lastRunStatus !== 'ok') {
         results.push(
           this.warn(
@@ -110,9 +110,10 @@ export class CronWatcher extends BaseWatcher {
         }
       }
 
-      // Check delivery status (skip if delivery mode is "none" — not-delivered is expected)
+      // Check delivery status — only flag actual error states, not idle/skipped states
       const deliveryMode = job.delivery?.mode ?? 'announce';
-      if (deliveryMode !== 'none' && state.lastDeliveryStatus && state.lastDeliveryStatus !== 'delivered') {
+      const deliveryErrorStates = ['failed', 'error', 'timeout'];
+      if (deliveryMode !== 'none' && state.lastDeliveryStatus && deliveryErrorStates.includes(state.lastDeliveryStatus)) {
         results.push(
           this.warn(
             `Cron '${name}' last delivery failed: ${state.lastDeliveryStatus}`,

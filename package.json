@@ -1,6 +1,6 @@
 {
   "name": "clawdoctor",
-  "version": "0.4.8",
+  "version": "0.4.9",
   "description": "Self-healing doctor for OpenClaw. Watches gateway, crons, and sessions, sends Telegram alerts, and auto-fixes what it can.",
   "main": "dist/index.js",
   "bin": {

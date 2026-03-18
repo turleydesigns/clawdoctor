@@ -36,6 +36,12 @@ export class CronHealer extends BaseHealer {
     const lastRun = (context.lastRun as string | undefined) ?? 'unknown';
     const dryRun = this.isEffectiveDryRun(this.config.healers.cronRetry.dryRun);
 
+    // Reset our count if OpenClaw reports the cron recovered (consecutiveErrors back to 0)
+    if (openclawConsecutive === 0) {
+      this.failureCounts.delete(cronName);
+      this.lastRetryTime.delete(cronName);
+    }
+
     // Track our own failure count
     const currentCount = (this.failureCounts.get(cronName) ?? 0) + 1;
     this.failureCounts.set(cronName, currentCount);
