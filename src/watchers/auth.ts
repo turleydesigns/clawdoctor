@@ -154,12 +154,18 @@ export class AuthWatcher extends BaseWatcher {
   }
 
   private readLogFiles(): string[] | null {
+    const baseDir = path.resolve(this.config.openclawPath);
     const logPaths = [
-      `${this.config.openclawPath}/logs/gateway.log`,
-      `${this.config.openclawPath}/gateway.log`,
+      path.join(baseDir, 'logs', 'gateway.log'),
+      path.join(baseDir, 'gateway.log'),
     ];
 
     for (const logPath of logPaths) {
+      // CLI-C2: Validate logPath stays within the expected openclaw directory
+      if (!logPath.startsWith(baseDir + path.sep) && logPath !== baseDir) {
+        console.error(`[AuthWatcher] Rejected log path outside openclaw dir: ${logPath}`);
+        continue;
+      }
       try {
         const output = execFileSync('tail', ['-n', String(MAX_LOG_LINES), logPath], {
           encoding: 'utf-8',

@@ -292,21 +292,32 @@ export class Daemon {
     await this.alerter.sendWithButtons(text, buttons, handlers, suggestions);
   }
 
+  // CLI-C1: Only allow safe identifier characters in callback args from Telegram.
+  // Telegram callback data is untrusted input — never pass raw values to execFileSync.
+  private validateCallbackArg(arg: string): string | null {
+    return /^[\w][\w\-]*$/.test(arg) && arg.length <= 128 ? arg : null;
+  }
+
   private async handleCallbackAction(callbackData: string): Promise<void> {
     const now = Date.now();
     const lastRun = this.callbackRateLimit.get(callbackData) ?? 0;
     if (now - lastRun < this.CALLBACK_DEBOUNCE_MS) {
-      console.log(`[${nowIso()}] [Daemon] Callback rate-limited (10s debounce): ${callbackData}`);
+      console.log(`[${nowIso()}] [Daemon] Callback rate-limited (10s debounce)`);
       return;
     }
     this.callbackRateLimit.set(callbackData, now);
 
-    console.log(`[${nowIso()}] [Daemon] Handling callback: ${callbackData}`);
+    // Do not log raw callbackData — it comes from Telegram and is untrusted
+    console.log(`[${nowIso()}] [Daemon] Handling callback action`);
     const parts = callbackData.split(':');
     const [resource, action, ...args] = parts;
 
     if (resource === 'cron') {
-      const cronName = args[0] ?? 'unknown';
+      const cronName = this.validateCallbackArg(args[0] ?? '');
+      if (!cronName) {
+        console.log(`[${nowIso()}] [CronHealer] Rejected: invalid cron name in callback`);
+        return;
+      }
       if (action === 'retry') {
         try {
           execFileSync('openclaw', ['cron', 'run', cronName]);
@@ -330,7 +341,7 @@ export class Daemon {
         console.log(`[${nowIso()}] [BudgetHealer] Emergency stop: ${killed} killed, ${failed} failed`);
       } else if (action === 'increase') {
         const newLimit = parseFloat(args[0] ?? '0');
-        if (newLimit > 0) {
+        if (newLimit > 0 && newLimit <= 10000) {
           this.config.budget.dailyLimitUsd = newLimit;
           console.log(`[${nowIso()}] [BudgetHealer] Daily limit increased to $${newLimit}`);
         }
@@ -338,8 +349,12 @@ export class Daemon {
         console.log(`[${nowIso()}] [BudgetHealer] Budget alert ignored`);
       }
     } else if (resource === 'session') {
-      const agent = args[0] ?? 'unknown';
-      const session = args[1] ?? 'unknown';
+      const agent = this.validateCallbackArg(args[0] ?? '');
+      const session = this.validateCallbackArg(args[1] ?? '');
+      if (!agent || !session) {
+        console.log(`[${nowIso()}] [SessionHealer] Rejected: invalid agent/session in callback`);
+        return;
+      }
       if (action === 'kill') {
         try {
           execFileSync('openclaw', ['session', 'kill', agent, session]);

@@ -263,12 +263,16 @@ function mergeConfig(defaults: ClawDoctorConfig, overrides: Partial<ClawDoctorCo
 export function saveConfig(config: ClawDoctorConfig): void {
   ensureAgentwatchDir();
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), { encoding: 'utf-8', mode: 0o600 });
+  // CLI-C3: Enforce permissions explicitly after write (mode option may not override existing files)
+  fs.chmodSync(CONFIG_PATH, 0o600);
 }
 
 export function ensureAgentwatchDir(): void {
   if (!fs.existsSync(AGENTWATCH_DIR)) {
     fs.mkdirSync(AGENTWATCH_DIR, { recursive: true, mode: 0o700 });
   }
+  // CLI-C3: Always enforce 0700 on config dir in case it was created with wrong permissions
+  fs.chmodSync(AGENTWATCH_DIR, 0o700);
 }
 
 export function configExists(): boolean {
